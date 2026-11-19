@@ -1,0 +1,44 @@
+@'
+# Node
+node_modules/
+dist/
+dist-ssr/
+*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Vite / tests
+.vite/
+coverage/
+
+# Rust / Tauri
+app/src-tauri/target/
+app/src-tauri/gen/schemas/
+*.pdb
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# OS / editors
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.sw?
+
+# Logs
+logs/
+*.log
+
+# Local AI weights (models are downloaded separately, not stored in git)
+models/
+*.gguf
+*.onnx
+*.safetensors
+'@ | Set-Content -Path .gitignore -Encoding ASCII
