@@ -1,6 +1,7 @@
-import { Handle, Position, NodeProps } from '@xyflow/react';
+import { Handle, Position } from '@xyflow/react';
+import type { NodeProps } from '@xyflow/react';
 import { MessageSquare } from 'lucide-react';
-import { VNNode } from '../store/project';
+import type { VNNode } from '../store/project';
 
 export function DialogueNode({ data, selected }: NodeProps<VNNode>) {
   const character = data.dialogue?.characterId ?? '???';
