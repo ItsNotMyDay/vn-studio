@@ -4,6 +4,7 @@ import type { Character } from './store';
 
 export interface AiSettings {
   endpoint: string;
+  serverToken: string;
   modelId: string;
   modelPath: string;
   llmPath: string;
@@ -23,6 +24,7 @@ export interface AiSettings {
 
 export const AI_DEFAULT: AiSettings = {
   endpoint: 'http://127.0.0.1:8765',
+  serverToken: '',
   modelId: 'qwen_image_2.1_turbo_int8_convrot',
   modelPath: '',
   llmPath: '',
@@ -153,16 +155,25 @@ export function buildBackgroundPrompt(desc: string, noPeople: boolean): string {
 
 /* ================================ транспорт ================================ */
 
+function getAiServerToken(): string {
+  try {
+    const raw = localStorage.getItem('vn-studio-ai');
+    const settings = raw ? JSON.parse(raw) : null;
+    return typeof settings?.serverToken === 'string' ? settings.serverToken.trim() : '';
+  } catch { return ''; }
+}
+
 async function jsonFetch(url: string, init?: RequestInit, timeoutMs = 15000): Promise<any> {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { ...init, signal: ctl.signal });
+    const headers = new Headers(init?.headers);
+    const token = getAiServerToken();
+    if (token) headers.set('Authorization', 'Bearer ' + token);
+    const res = await fetch(url, { ...init, headers, signal: ctl.signal });
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
     return await res.json();
-  } finally {
-    clearTimeout(t);
-  }
+  } finally { clearTimeout(t); }
 }
 
 export function normalizeOpenAiBase(url: string): string {
@@ -182,7 +193,10 @@ async function openAiProxy<T>(endpoint: string, path: string, payload: unknown, 
   signal?.addEventListener('abort', abort, { once: true });
   const timeout = setTimeout(() => ctl.abort(), 180000);
   try {
-    const response = await fetch(endpoint.replace(/\/+$/, '') + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: ctl.signal });
+    const headers = new Headers({ 'Content-Type': 'application/json' });
+    const serverToken = getAiServerToken();
+    if (serverToken) headers.set('Authorization', 'Bearer ' + serverToken);
+    const response = await fetch(endpoint.replace(/\\/+$/, '') + path, { method: 'POST', headers, body: JSON.stringify(payload), signal: ctl.signal });
     if (!response.ok) { const detail = await response.text(); throw new Error('OpenAI API · HTTP ' + response.status + ': ' + detail.slice(0, 500)); }
     return await response.json() as T;
   } catch (error: any) {
