@@ -35,6 +35,20 @@ taskkill /f /im python.exe 2>nul
 set VN_MODEL_PATH=C:\models\Qwen-Image-2.1-Turbo
 set VN_LLM_PATH=C:\models\qwen3-14b
 set VN_EMBED_PATH=C:\models\e5-small
+if not defined VN_SERVER_HOST set "VN_SERVER_HOST=127.0.0.1"
+if not defined VN_SERVER_PORT set "VN_SERVER_PORT=8765"
+
+:: При сетевом доступе включаем общий bearer-токен.
+:: Не открывайте этот порт в интернет и используйте только доверенную локальную сеть.
+if /I "%VN_SERVER_HOST%"=="0.0.0.0" if not defined VN_SERVER_TOKEN (
+    echo Для сетевого доступа задайте общий токен, который нужно будет ввести в VN Studio на клиентских ПК.
+    set /p "VN_SERVER_TOKEN=Токен доступа к AI-серверу: "
+    if not defined VN_SERVER_TOKEN (
+        echo ОШИБКА: при прослушивании 0.0.0.0 обязателен VN_SERVER_TOKEN.
+        pause
+        exit /b 1
+    )
+)
 
 :: Запуск AI-сервера ИЗ ПАПКИ ai-server (важно!)
 echo Запуск AI-сервера... >> "%ROOT_DIR%\launcher.log"
@@ -43,7 +57,7 @@ echo VN_LLM_PATH=%VN_LLM_PATH% >> "%ROOT_DIR%\launcher.log"
 echo VN_EMBED_PATH=%VN_EMBED_PATH% >> "%ROOT_DIR%\launcher.log"
 
 pushd "%AI_DIR%"
-start "" /b cmd /c "set VN_MODEL_PATH=%VN_MODEL_PATH%&& set VN_LLM_PATH=%VN_LLM_PATH%&& set VN_EMBED_PATH=%VN_EMBED_PATH%&& "%PYTHON_PATH%" -m uvicorn server:app --host 127.0.0.1 --port 8765"
+start "" /b cmd /c ""%PYTHON_PATH%" -m uvicorn server:app --host %VN_SERVER_HOST% --port %VN_SERVER_PORT%"
 popd
 
 :: Ожидание готовности сервера (30 секунд с проверкой через curl)
@@ -52,7 +66,7 @@ set /a attempts=0
 :wait_loop
 timeout /t 2 /nobreak >nul
 set /a attempts+=1
-curl.exe -s -o NUL -w "%%{http_code}" http://127.0.0.1:8765/health > "%ROOT_DIR%\health.tmp" 2>nul
+curl.exe -s -o NUL -w "%%{http_code}" http://127.0.0.1:%VN_SERVER_PORT%/health > "%ROOT_DIR%\health.tmp" 2>nul
 set /p HTTP_CODE=<"%ROOT_DIR%\health.tmp"
 if "%HTTP_CODE%"=="200" goto server_ready
 if %attempts% lss 15 goto wait_loop
