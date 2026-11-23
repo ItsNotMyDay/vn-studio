@@ -10,6 +10,7 @@ import uuid
 import re
 import urllib.error
 import urllib.request
+import secrets
 from typing import Optional
 
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
@@ -17,8 +18,9 @@ if os.name != "nt":
     os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 MODEL_ID_DEFAULT = os.environ.get("VN_MODEL_ID", "qwen_image_2.1_turbo_int8_convrot")
@@ -30,6 +32,16 @@ LLM_PATH_DEFAULT = os.environ.get("VN_LLM_PATH", "C:\\models\\qwen3-14b")
 
 app = FastAPI(title="VN Studio local AI server")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+@app.middleware('http')
+async def protect_shared_server(request: Request, call_next):
+    expected = os.environ.get('VN_SERVER_TOKEN', '').strip()
+    if expected and request.url.path != '/health' and request.method != 'OPTIONS':
+        authorization = request.headers.get('authorization', '')
+        supplied = authorization[7:].strip() if authorization.lower().startswith('bearer ') else ''
+        if not secrets.compare_digest(supplied, expected):
+            return JSONResponse(status_code=401, content={'detail': 'Неверный токен доступа к VN Studio AI server'})
+    return await call_next(request)
 
 # transformers lazy modules are NOT thread-safe on first import:
 # pre-import them once, single-threaded, at server startup.
