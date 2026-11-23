@@ -139,7 +139,6 @@ function Canvas() {
           selectionKeyCode="Shift"
           proOptions={{ hideAttribution: true }}
           onPaneClick={() => { s.selectChar(null); setConnMenu(null); }}
-          fitViewOnInit={false}
         >
           {s.director.grid && <Background variant={BackgroundVariant.Dots} gap={24} size={1.2} color="#232c47" />}
           {s.director.minimap && (
