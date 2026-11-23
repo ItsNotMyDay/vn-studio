@@ -43,7 +43,7 @@ if /I not "%VN_SERVER_HOST%"=="127.0.0.1" if /I not "%VN_SERVER_HOST%"=="localho
     echo Для сетевого доступа задайте общий токен, который нужно будет ввести в VN Studio на клиентских ПК.
     set /p "VN_SERVER_TOKEN=Токен доступа к AI-серверу: "
     if not defined VN_SERVER_TOKEN (
-        echo ОШИБКА: при прослушивании 0.0.0.0 обязателен VN_SERVER_TOKEN.
+        echo ОШИБКА: при сетевом доступе обязателен VN_SERVER_TOKEN.
         pause
         exit /b 1
     )
