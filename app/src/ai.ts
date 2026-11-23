@@ -7,6 +7,10 @@ export interface AiSettings {
   modelId: string;
   modelPath: string;
   llmPath: string;
+  llmProvider: 'local' | 'openai';
+  openaiBaseUrl: string;
+  openaiApiKey: string;
+  openaiModel: string;
   steps: number;
   guidance: number;
   width: number;
@@ -22,6 +26,10 @@ export const AI_DEFAULT: AiSettings = {
   modelId: 'qwen_image_2.1_turbo_int8_convrot',
   modelPath: '',
   llmPath: '',
+  llmProvider: 'local',
+  openaiBaseUrl: 'https://api.openai.com/v1',
+  openaiApiKey: '',
+  openaiModel: '',
   steps: 8,
   guidance: 1.0,
   width: 768,
@@ -42,7 +50,10 @@ export function loadAiSettings(): AiSettings {
 
 export function saveAiSettings(patch: Partial<AiSettings>): AiSettings {
   const next = { ...loadAiSettings(), ...patch };
-  try { localStorage.setItem('vn-studio-ai', JSON.stringify(next)); } catch {}
+  try {
+    localStorage.setItem('vn-studio-ai', JSON.stringify(next));
+    window.dispatchEvent(new Event('vn-studio-ai-settings'));
+  } catch {}
   return next;
 }
 
@@ -154,6 +165,44 @@ async function jsonFetch(url: string, init?: RequestInit, timeoutMs = 15000): Pr
   }
 }
 
+export function normalizeOpenAiBase(url: string): string {
+  const clean = url.trim().replace(/\\/+$/, '');
+  if (!clean) throw new Error('Укажите адрес OpenAI API');
+  const parsed = new URL(clean);
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('Адрес API должен начинаться с http:// или https://');
+  return /\\/v\\d+$/i.test(parsed.pathname.replace(/\\/+$/, '')) ? clean : clean + '/v1';
+}
+
+export interface OpenAiSettings { baseUrl: string; apiKey: string; model: string; }
+
+async function openAiProxy<T>(endpoint: string, path: string, payload: unknown, signal?: AbortSignal): Promise<T> {
+  const ctl = new AbortController();
+  const abort = () => ctl.abort();
+  if (signal?.aborted) throw new DOMException('cancelled', 'AbortError');
+  signal?.addEventListener('abort', abort, { once: true });
+  const timeout = setTimeout(() => ctl.abort(), 180000);
+  try {
+    const response = await fetch(endpoint.replace(/\\/+$/, '') + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: ctl.signal });
+    if (!response.ok) { const detail = await response.text(); throw new Error('OpenAI API · HTTP ' + response.status + ': ' + detail.slice(0, 500)); }
+    return await response.json() as T;
+  } catch (error: any) {
+    if (error?.name === 'AbortError') { if (signal?.aborted) throw error; throw new Error('Таймаут обращения к OpenAI API'); }
+    throw error;
+  } finally { clearTimeout(timeout); signal?.removeEventListener('abort', abort); }
+}
+
+export async function openAiListModels(endpoint: string, settings: Pick<OpenAiSettings, 'baseUrl' | 'apiKey'>): Promise<{ data: { id: string }[] }> {
+  return openAiProxy(endpoint, '/openai/models', { base_url: normalizeOpenAiBase(settings.baseUrl), api_key: settings.apiKey });
+}
+
+async function openAiChat(endpoint: string, settings: OpenAiSettings, messages: LlmMessage[], maxTokens: number, temperature: number, signal?: AbortSignal): Promise<string> {
+  if (!settings.model.trim()) throw new Error('Укажите ID модели OpenAI API');
+  const result = await openAiProxy<{ reply?: string }>(endpoint, '/openai/chat', {
+    base_url: normalizeOpenAiBase(settings.baseUrl), api_key: settings.apiKey, model: settings.model.trim(), messages, max_tokens: maxTokens, temperature,
+  }, signal);
+  if (!result.reply) throw new Error('OpenAI API вернул пустой ответ');
+  return result.reply;
+}
 export interface AiHealth {
   ok: boolean;
   device?: string;
@@ -180,7 +229,8 @@ export interface JobState {
   partial?: string;
   result?: { image_base64: string; mime: string; seed: number; width: number; height: number; model_id: string }
     | { reply: string }
-    | { suggestions: { text: string; tone?: string }[]; raw?: string };
+    | { suggestions: { text: string; tone?: string }[]; raw?: string }
+    | { id: string; path: string; kind: string };
 }
 
 export async function aiStartJob(endpoint: string, path: string, payload: any): Promise<string> {
@@ -233,6 +283,18 @@ export async function aiListModels(endpoint: string): Promise<{
   embed: { id: string; path: string }[];
 }> {
   return jsonFetch(`${endpoint.replace(/\/+$/, '')}/models/list`, undefined, 8000);
+}
+
+export async function aiDownloadHfModel(
+  endpoint: string, repoId: string, kind: 'llm' | 'image',
+  onProgress?: (p: number, stage: string) => void, signal?: AbortSignal,
+): Promise<{ id: string; path: string; kind: string }> {
+  const base = endpoint.replace(/\\/+$/, '');
+  const r = await jsonFetch(base + '/models/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ repo_id: repoId, kind }) }, 20000);
+  if (!r.job_id) throw new Error('сервер не вернул job_id скачивания');
+  const final = await aiPollJob(base, r.job_id, j => onProgress?.(j.progress ?? 0, j.stage ?? 'Скачивание…'), signal ?? new AbortController().signal, 3 * 60 * 60 * 1000, 800);
+  if (final.state !== 'done' || !final.result) throw new Error(final.message || final.state);
+  return final.result as { id: string; path: string; kind: string };
 }
 
 export async function aiLoadJob(
@@ -312,7 +374,9 @@ export async function llmChat(
   onPartial?: (text: string) => void,
   onJobId?: (id: string) => void,
   signal?: AbortSignal,
+  remote?: OpenAiSettings,
 ): Promise<string> {
+  if (remote) return openAiChat(endpoint, remote, messages, maxTokens, temp, signal);
   const base = endpoint.replace(/\/+$/, '');
   const r = await jsonFetch(`${base}/llm/chat`, {
     method: 'POST',
@@ -338,7 +402,18 @@ export async function llmSuggest(
   temp = 0.85,
   onJobId?: (id: string) => void,
   signal?: AbortSignal,
+  remote?: OpenAiSettings,
 ): Promise<{ suggestions: LlmSuggestion[] }> {
+  if (remote) {
+    const system = 'Ты — опытный сценарист визуальных новелл. Предложи несколько живых реплик на русском языке с учётом характера персонажа, эмоции и контекста. Верни только валидный JSON без Markdown: {"suggestions":[{"text":"...","tone":"..."}]}';
+    const user = 'Количество вариантов: ' + count + '. Контекст:\\n' + JSON.stringify(context, null, 2);
+    const raw = await openAiChat(endpoint, remote, [{ role: 'system', content: system }, { role: 'user', content: user }], maxTokens, temp, signal);
+    const match = raw.match(/\\{[\\s\\S]*\\}/);
+    if (!match) throw new Error('OpenAI API не вернул JSON с вариантами');
+    const parsed = JSON.parse(match[0]);
+    if (!Array.isArray(parsed.suggestions)) throw new Error('В ответе нет списка suggestions');
+    return { suggestions: parsed.suggestions.slice(0, count) };
+  }
   const base = endpoint.replace(/\/+$/, '');
   const r = await jsonFetch(`${base}/llm/suggest`, {
     method: 'POST',
