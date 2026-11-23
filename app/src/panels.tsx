@@ -18,7 +18,8 @@ import { AiSpriteDialog } from './AiSpriteDialog';
 import { AiBackgroundDialog } from './AiBackgroundDialog';
 import {
   loadAiSettings, saveAiSettings, aiHealth, llmHealth, embeddingsHealth, aiListModels,
-  aiLoadJob, llmLoadJob, aiUnloadModel, llmUnload, aiCancelJob, type AiSettings,
+  aiLoadJob, llmLoadJob, aiUnloadModel, llmUnload, aiCancelJob,
+  aiDownloadHfModel, openAiListModels, normalizeOpenAiBase, type AiSettings,
 } from './ai';
 
 const KIND_ICONS: Record<string, any> = {
@@ -1267,6 +1268,14 @@ function AiModelsPanel() {
   const [prog, setProg] = useState<{ img: { on: boolean; p: number; stage: string }; llm: { on: boolean; p: number; stage: string } }>(
     { img: { on: false, p: 0, stage: '' }, llm: { on: false, p: 0, stage: '' } }
   );
+  const [addMode, setAddMode] = useState<null | 'menu' | 'hf' | 'api'>(null);
+  const [hfUrl, setHfUrl] = useState('');
+  const [downloadProg, setDownloadProg] = useState<{ on: boolean; p: number; stage: string }>({ on: false, p: 0, stage: '' });
+  const [apiBase, setApiBase] = useState(cfg.openaiBaseUrl);
+  const [apiKey, setApiKey] = useState(cfg.openaiApiKey);
+  const [apiModel, setApiModel] = useState(cfg.openaiModel);
+  const [apiChecking, setApiChecking] = useState(false);
+  const [remoteOk, setRemoteOk] = useState<boolean | null>(null);
   const ep = (s.director.aiEndpoint || 'http://127.0.0.1:8765').replace(/\/+$/, '');
 
   useEffect(() => {
@@ -1284,6 +1293,91 @@ function AiModelsPanel() {
   }, [ep]);
 
   const patch = (p: Partial<AiSettings>) => setCfg(saveAiSettings(p));
+
+  const openAddModel = () => {
+    setHfUrl('');
+    setApiBase(cfg.openaiBaseUrl);
+    setApiKey(cfg.openaiApiKey);
+    setApiModel(cfg.openaiModel);
+    setAddMode('menu');
+  };
+
+  const downloadFromHf = async () => {
+    let repoId = '';
+    try {
+      const url = new URL(hfUrl.trim());
+      if (url.hostname !== 'huggingface.co' && url.hostname !== 'www.huggingface.co') {
+        throw new Error('Нужна ссылка именно на huggingface.co');
+      }
+      const parts = url.pathname.split('/').filter(Boolean);
+      if (parts.length < 2) throw new Error('Ссылка должна вести на репозиторий owner/model');
+      repoId = decodeURIComponent(parts[0]) + '/' + decodeURIComponent(parts[1]);
+    } catch (error: any) {
+      s.toast(error?.message || 'Некорректная ссылка Hugging Face');
+      return;
+    }
+
+    setDownloadProg({ on: true, p: 0, stage: 'Подключение…' });
+    try {
+      const model = await aiDownloadHfModel(ep, repoId, 'llm', (p, stage) => {
+        setDownloadProg({ on: true, p, stage });
+      });
+      patch({ llmPath: model.path, llmProvider: 'local' });
+      setList(await aiListModels(ep));
+      setAddMode(null);
+      s.toast('Модель скачана и добавлена в список');
+    } catch (error: any) {
+      s.toast('Ошибка скачивания: ' + (error?.message ?? error));
+    } finally {
+      setDownloadProg({ on: false, p: 0, stage: '' });
+    }
+  };
+
+  const connectOpenAi = async () => {
+    if (!apiBase.trim() || !apiModel.trim()) {
+      s.toast('Укажите адрес API и ID модели');
+      return;
+    }
+    setApiChecking(true);
+    try {
+      const normalized = normalizeOpenAiBase(apiBase);
+      const models = await openAiListModels(ep, { baseUrl: normalized, apiKey: apiKey.trim() });
+      const ids = (models.data ?? []).map(item => item.id).filter(Boolean);
+      const selected = apiModel.trim() || ids[0] || '';
+      if (!selected) throw new Error('Сервер ответил, но не вернул список моделей. Введите ID модели вручную.');
+      if (ids.length && !ids.includes(selected)) {
+        throw new Error('Модель ' + selected + ' не найдена в /models. Проверьте её ID.');
+      }
+      patch({
+        llmProvider: 'openai',
+        openaiBaseUrl: normalized,
+        openaiApiKey: apiKey.trim(),
+        openaiModel: selected,
+      });
+      setRemoteOk(true);
+      setAddMode(null);
+      s.toast('OpenAI-совместимая модель подключена');
+    } catch (error: any) {
+      setRemoteOk(false);
+      s.toast('Ошибка подключения: ' + (error?.message ?? error));
+    } finally {
+      setApiChecking(false);
+    }
+  };
+
+  const checkOpenAi = async () => {
+    setApiChecking(true);
+    try {
+      const models = await openAiListModels(ep, { baseUrl: cfg.openaiBaseUrl, apiKey: cfg.openaiApiKey });
+      setRemoteOk(true);
+      s.toast('Соединение установлено. Моделей в списке: ' + (models.data?.length ?? 0));
+    } catch (error: any) {
+      setRemoteOk(false);
+      s.toast('OpenAI API недоступен: ' + (error?.message ?? error));
+    } finally {
+      setApiChecking(false);
+    }
+  };
 
   const loadImg = async () => {
     setProg(p => ({ ...p, img: { on: true, p: 0, stage: 'Старт…' } }));
@@ -1344,26 +1438,64 @@ function AiModelsPanel() {
 
       <div className="border-t border-ink-700 pt-2 space-y-2">
         <span className="block text-[10px] text-mute">Языковая модель (LLM)</span>
-        <select className="select" value={cfg.llmPath} onChange={e => patch({ llmPath: e.target.value })}>
-          <option value="">— по умолчанию (VN_LLM_PATH) —</option>
-          {llmOptions.map(o => <option key={o.path} value={o.path}>{o.id}</option>)}
-        </select>
-        <div className="flex flex-wrap gap-1.5">
-          <span className="chip" style={{ borderColor: llmH?.loaded ? '#9dff5766' : '#3a4666', color: llmH?.loaded ? '#9dff57' : '#8d97b5' }}>
-            {llmH?.loaded ? `${modelNameOf(llmH.path)} · ${llmH.device}` : 'не загружена'}
-          </span>
-        </div>
-        {prog.llm.on && <ProgressBar p={prog.llm.p} stage={prog.llm.stage} />}
         <div className="flex gap-1.5">
-          <button className="btn flex-1 justify-center" disabled={prog.llm.on} onClick={loadLlm}><Server size={12} /> Загрузить</button>
-          <button
-            className="btn btn-danger flex-1 justify-center"
-            disabled={!llmH?.loaded || prog.llm.on}
-            onClick={async () => { await llmUnload(ep); s.toast('LLM выгружена'); }}
+          <select
+            className="select min-w-0 flex-1"
+            value={cfg.llmProvider === 'openai' ? '__openai__' : cfg.llmPath}
+            onChange={e => e.target.value === '__openai__'
+              ? patch({ llmProvider: 'openai' })
+              : patch({ llmProvider: 'local', llmPath: e.target.value })}
           >
-            <X size={12} /> Выгрузить
-          </button>
+            <option value="">— по умолчанию (VN_LLM_PATH) —</option>
+            {llmOptions.map(o => <option key={o.path} value={o.path}>{o.id}</option>)}
+            <option value="__openai__">OpenAI API · {cfg.openaiModel || 'не настроен'}</option>
+          </select>
+          <button className="btn shrink-0" onClick={openAddModel} title="Добавить модель"><Plus size={13} /> Добавить</button>
         </div>
+        {cfg.llmProvider === 'openai' ? (
+          <>
+            <div className="flex items-center flex-wrap gap-1.5">
+              <span className="chip" style={{ borderColor: remoteOk === false ? '#ff547066' : '#9dff5766', color: remoteOk === false ? '#ff5470' : '#9dff57' }}>
+                {remoteOk === false ? 'нет соединения' : 'OpenAI API'}
+              </span>
+              <span className="chip border-ink-600 text-mute">{cfg.openaiModel || 'модель не указана'}</span>
+            </div>
+            <div className="text-[10px] text-mute break-all">{cfg.openaiBaseUrl}</div>
+            <button className="btn w-full justify-center" disabled={apiChecking} onClick={checkOpenAi}>
+              {apiChecking ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} Проверить подключение
+            </button>
+          </>
+        ) : (
+          <>
+            <div className="flex flex-wrap gap-1.5">
+              <span className="chip" style={{ borderColor: llmH?.loaded ? '#9dff5766' : '#3a4666', color: llmH?.loaded ? '#9dff57' : '#8d97b5' }}>
+                {llmH?.loaded ? `${modelNameOf(llmH.path)} · ${llmH.device}` : 'не загружена'}
+              </span>
+            </div>
+            {prog.llm.on && <ProgressBar p={prog.llm.p} stage={prog.llm.stage} />}
+            <div className="flex gap-1.5">
+              <button className="btn flex-1 justify-center" disabled={prog.llm.on} onClick={loadLlm}><Server size={12} /> Загрузить</button>
+              <button
+                className="btn btn-danger flex-1 justify-center"
+                disabled={!llmH?.loaded || prog.llm.on}
+                onClick={async () => { await llmUnload(ep); s.toast('LLM выгружена'); }}
+              >
+                <X size={12} /> Выгрузить
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="border-t border-ink-700 pt-2 space-y-2">
+        <span className="block text-[10px] text-mute">Адрес AI-сервера (локальные модели, загрузки и RAG)</span>
+        <input
+          className="input"
+          value={s.director.aiEndpoint ?? 'http://127.0.0.1:8765'}
+          onChange={e => s.setDirector({ aiEndpoint: e.target.value })}
+          placeholder="http://192.168.1.10:8765"
+        />
+        <span className="block text-[10px] text-mute">Для другого ПК укажи сетевой адрес компьютера, на котором запущен ai-server.</span>
       </div>
 
       <div className="border-t border-ink-700 pt-2 flex flex-wrap items-center gap-1.5">
@@ -1374,6 +1506,62 @@ function AiModelsPanel() {
         <span className="chip border-ink-600 text-mute">{embH?.indexes?.length ?? 0} глав в индексе</span>
       </div>
     </Group>
+
+    {addMode && (
+      <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={() => !downloadProg.on && setAddMode(null)}>
+        <div className="panel border border-ink-600 rounded-2xl w-[min(520px,94vw)] p-4 shadow-2xl space-y-3" onClick={e => e.stopPropagation()}>
+          <div className="flex items-center gap-2">
+            <Package size={16} style={{ color: 'var(--accent)' }} />
+            <span className="font-bold text-[13px]">Добавить языковую модель</span>
+            <div className="flex-1" />
+            <button className="btn !px-2" disabled={downloadProg.on || apiChecking} onClick={() => setAddMode(null)}><X size={13} /></button>
+          </div>
+          {addMode === 'menu' && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button className="btn justify-center !py-4" onClick={() => setAddMode('hf')}>
+                <Download size={15} /> Скачать локально
+                <span className="block text-[10px] text-mute">Из публичного репозитория Hugging Face</span>
+              </button>
+              <button className="btn justify-center !py-4" onClick={() => setAddMode('api')}>
+                <KeyRound size={15} /> API ключ
+                <span className="block text-[10px] text-mute">Удалённая модель по OpenAI API</span>
+              </button>
+            </div>
+          )}
+          {addMode === 'hf' && (
+            <div className="space-y-2">
+              <label className="block text-[11px] text-mute">Ссылка на модель на huggingface.co</label>
+              <input className="input" value={hfUrl} onChange={e => setHfUrl(e.target.value)} placeholder="https://huggingface.co/Qwen/Qwen3-14B" />
+              <div className="text-[10px] text-mute">Модель будет скачана на компьютер с AI-сервером в папку моделей. Поддерживаются репозитории Transformers с config.json; GGUF пока не поддерживается.</div>
+              {downloadProg.on && <ProgressBar p={downloadProg.p} stage={downloadProg.stage} />}
+              <div className="flex gap-2">
+                <button className="btn flex-1 justify-center" disabled={downloadProg.on || !hfUrl.trim()} onClick={downloadFromHf}>
+                  {downloadProg.on ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />} Скачать
+                </button>
+                <button className="btn" disabled={downloadProg.on} onClick={() => setAddMode('menu')}>Назад</button>
+              </div>
+            </div>
+          )}
+          {addMode === 'api' && (
+            <div className="space-y-2">
+              <label className="block text-[11px] text-mute">Адрес OpenAI-совместимого API</label>
+              <input className="input" value={apiBase} onChange={e => setApiBase(e.target.value)} placeholder="https://api.openai.com/v1" />
+              <label className="block text-[11px] text-mute">API ключ</label>
+              <input className="input" type="password" autoComplete="new-password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="sk-…" />
+              <label className="block text-[11px] text-mute">ID модели</label>
+              <input className="input" value={apiModel} onChange={e => setApiModel(e.target.value)} placeholder="gpt-4o-mini" />
+              <div className="text-[10px] text-mute">Ключ хранится в локальных настройках этого приложения на текущем ПК и передаётся AI-серверу только при запросах. Для сетевых адресов HTTP используй только доверенную локальную сеть.</div>
+              <div className="flex gap-2">
+                <button className="btn btn-primary flex-1 justify-center" disabled={apiChecking} onClick={connectOpenAi}>
+                  {apiChecking ? <Loader2 size={12} className="animate-spin" /> : <Server size={12} />} Проверить и подключить
+                </button>
+                <button className="btn" disabled={apiChecking} onClick={() => setAddMode('menu')}>Назад</button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    )}
   );
 }
 
