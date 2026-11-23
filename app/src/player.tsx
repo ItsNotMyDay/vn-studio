@@ -46,6 +46,7 @@ function PlayerApp() {
     // Signal only after the message listeners are attached. The editor can then
     // safely resend a launch request that may have arrived too early.
     post({ type: 'ready' });
+    post({ type: 'request-sync' });
     return unsubscribe;
   }, []);
   useEffect(() => { audioSetVolume(s.director.volume); }, [s.director.volume]);
