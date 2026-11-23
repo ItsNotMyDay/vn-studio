@@ -6,9 +6,8 @@ import {
   useNodesState,
   useEdgesState,
   addEdge,
-  Connection,
-  NodeTypes,
 } from '@xyflow/react';
+import type { Connection, NodeTypes } from '@xyflow/react';
 import { useCallback, useEffect, useMemo } from 'react';
 import { useProject } from '../store/project';
 import { DialogueNode } from '../nodes/DialogueNode';
