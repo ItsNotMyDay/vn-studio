@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Node, Edge, Connection, NodeChange, EdgeChange, ReactFlowInstance } from '@xyflow/react';
+import type { Node, Edge, Connection, NodeChangeset, EdgeChangeset, ReactFlowInstance } from '@xyflow/react';
 import { applyNodes, applyEdges, connect, ARROW } from './flowUtils';
 import * as audioEngine from './audio';
 import { getAssetURL, importFile, deleteBlob, revokeAssetURL, putBlob } from './assets';
@@ -510,8 +510,8 @@ interface Store {
   undo: () => void;
   redo: () => void;
 
-  onNodesChange: (chs: NodeChange[]) => void;
-  onEdgesChange: (chs: EdgeChange[]) => void;
+  onNodesChange: (chs: NodeChangeset<Node>) => void;
+  onEdgesChange: (chs: EdgeChangeset<Edge>) => void;
   onConnect: (c: Connection) => void;
   addNode: (kind: NodeKind, pos: { x: number; y: number }, data?: any) => string;
   updateNodeData: (id: string, patch: any) => void;
@@ -1024,8 +1024,8 @@ export const useStore = create<Store>((set, get) => {
       get().toast('Повторено');
     },
 
-    onNodesChange: chs => mutateScene(sc => ({ ...sc, nodes: applyNodes(chs, sc.nodes) })),
-    onEdgesChange: chs => mutateScene(sc => ({ ...sc, edges: applyEdges(chs, sc.edges) })),
+    onNodesChange: chs => mutateScene(sc => ({ ...sc, nodes: applyNodes(chs.toArray(), sc.nodes) })),
+    onEdgesChange: chs => mutateScene(sc => ({ ...sc, edges: applyEdges(chs.toArray(), sc.edges) })),
     onConnect: c => {
       const sc = get().scene();
       if (!sc || !c.source || !c.target || c.source === c.target) return;
@@ -1725,7 +1725,7 @@ export const useStore = create<Store>((set, get) => {
           }
           return;
         }
-        step(routeFrom(sc, curId, get().player.vars).target);
+        step(routeFrom(sc, curId, get().player.vars).target ?? null);
       };
       step(sc.nodes.find(n => n.type === 'start')?.id ?? null);
     },
