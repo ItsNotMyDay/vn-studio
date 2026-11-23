@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { MessageSquare, Send, Loader2, X, Server, Trash2, RefreshCw, Square, Database, BookOpen, Wrench, Check, Ban, Undo2 } from 'lucide-react';
 import { useStore } from './store';
-import { llmHealth, llmLoadJob, llmChat, aiCancelJob, embeddingsSearch, embeddingsIndex, loadAiSettings, openAiListModels, type AiSettings, type LlmMessage, type RichContext } from './ai';
+import { aiHealth, llmHealth, llmLoadJob, llmChat, aiCancelJob, embeddingsSearch, embeddingsIndex, loadAiSettings, openAiListModels, type AiSettings, type LlmMessage, type RichContext } from './ai';
 import { TOOLS_DOC, canvasSnapshot, parsePlan, executePlan, describeAction, type AgentPlan, type ExecResult } from './agentTools';
 
 function normalizeEndpoint(ep?: string) {
@@ -92,8 +92,8 @@ export function LlmChat() {
           error: connected ? undefined : 'Модель не найдена в ответе /models',
         });
       } else {
-        const h = await llmHealth(endpoint);
-        if (alive.current) setStatus({ online: true, loaded: !!h.loaded, path: h.path, device: h.device, error: h.error });
+        const [server, h] = await Promise.all([aiHealth(endpoint), llmHealth(endpoint)]);
+        if (alive.current) setStatus({ online: !!server.ok, loaded: !!h.loaded, path: h.path, device: h.device, error: server.ok ? h.error : server.error });
       }
     } catch (error: any) {
       if (alive.current) setStatus({ online: false, loaded: false, error: error?.message ?? 'нет соединения' });
@@ -378,7 +378,9 @@ export function LlmChat() {
       )}
       {status.online && !status.loaded && (
         <div className="px-3 py-2 border-t border-ink-700 space-y-1.5 text-left">
-          {loadingModel ? (
+          {aiCfg.llmProvider === 'openai' ? (
+            <div className="text-[11px] text-danger">OpenAI API доступен, но выбранная модель не найдена. Проверьте ID модели в «Режиссёрском пульте».</div>
+          ) : loadingModel ? (
             <>
               <div className="flex justify-between text-[10px] text-mute">
                 <span className="truncate font-mono">{loadProg.stage || 'Загрузка весов…'}</span>
