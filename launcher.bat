@@ -56,7 +56,7 @@ echo VN_LLM_PATH=%VN_LLM_PATH% >> "%ROOT_DIR%\launcher.log"
 echo VN_EMBED_PATH=%VN_EMBED_PATH% >> "%ROOT_DIR%\launcher.log"
 
 pushd "%AI_DIR%"
-start "VN Studio AI Server" /min cmd /c ""%PYTHON_PATH%" -m uvicorn server:app --host %VN_SERVER_HOST% --port %VN_SERVER_PORT%"
+start "VN Studio AI Server" /min "%PYTHON_PATH%" -m uvicorn server:app --host %VN_SERVER_HOST% --port %VN_SERVER_PORT%
 popd
 
 :: Ожидание готовности сервера (30 секунд с проверкой через curl)
