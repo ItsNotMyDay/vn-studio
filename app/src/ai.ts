@@ -166,11 +166,11 @@ async function jsonFetch(url: string, init?: RequestInit, timeoutMs = 15000): Pr
 }
 
 export function normalizeOpenAiBase(url: string): string {
-  const clean = url.trim().replace(/\\/+$/, '');
+  const clean = url.trim().replace(/\/+$/, '');
   if (!clean) throw new Error('Укажите адрес OpenAI API');
   const parsed = new URL(clean);
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('Адрес API должен начинаться с http:// или https://');
-  return /\\/v\\d+$/i.test(parsed.pathname.replace(/\\/+$/, '')) ? clean : clean + '/v1';
+  return /\/v\d+$/i.test(parsed.pathname.replace(/\/+$/, '')) ? clean : clean + '/v1';
 }
 
 export interface OpenAiSettings { baseUrl: string; apiKey: string; model: string; }
@@ -182,7 +182,7 @@ async function openAiProxy<T>(endpoint: string, path: string, payload: unknown, 
   signal?.addEventListener('abort', abort, { once: true });
   const timeout = setTimeout(() => ctl.abort(), 180000);
   try {
-    const response = await fetch(endpoint.replace(/\\/+$/, '') + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: ctl.signal });
+    const response = await fetch(endpoint.replace(/\/+$/, '') + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: ctl.signal });
     if (!response.ok) { const detail = await response.text(); throw new Error('OpenAI API · HTTP ' + response.status + ': ' + detail.slice(0, 500)); }
     return await response.json() as T;
   } catch (error: any) {
@@ -289,7 +289,7 @@ export async function aiDownloadHfModel(
   endpoint: string, repoId: string, kind: 'llm' | 'image',
   onProgress?: (p: number, stage: string) => void, signal?: AbortSignal,
 ): Promise<{ id: string; path: string; kind: string }> {
-  const base = endpoint.replace(/\\/+$/, '');
+  const base = endpoint.replace(/\/+$/, '');
   const r = await jsonFetch(base + '/models/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ repo_id: repoId, kind }) }, 20000);
   if (!r.job_id) throw new Error('сервер не вернул job_id скачивания');
   const final = await aiPollJob(base, r.job_id, j => onProgress?.(j.progress ?? 0, j.stage ?? 'Скачивание…'), signal ?? new AbortController().signal, 3 * 60 * 60 * 1000, 800);
@@ -408,7 +408,7 @@ export async function llmSuggest(
     const system = 'Ты — опытный сценарист визуальных новелл. Предложи несколько живых реплик на русском языке с учётом характера персонажа, эмоции и контекста. Верни только валидный JSON без Markdown: {"suggestions":[{"text":"...","tone":"..."}]}';
     const user = 'Количество вариантов: ' + count + '. Контекст:\\n' + JSON.stringify(context, null, 2);
     const raw = await openAiChat(endpoint, remote, [{ role: 'system', content: system }, { role: 'user', content: user }], maxTokens, temp, signal);
-    const match = raw.match(/\\{[\\s\\S]*\\}/);
+    const match = raw.match(/\{[\s\S]*\}/);
     if (!match) throw new Error('OpenAI API не вернул JSON с вариантами');
     const parsed = JSON.parse(match[0]);
     if (!Array.isArray(parsed.suggestions)) throw new Error('В ответе нет списка suggestions');
