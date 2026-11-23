@@ -31,8 +31,6 @@ TOKENIZER_FALLBACK_REPO = os.environ.get("VN_TOKENIZER_REPO", "Qwen/Qwen-Image")
 LLM_PATH_DEFAULT = os.environ.get("VN_LLM_PATH", "C:\\models\\qwen3-14b")
 
 app = FastAPI(title="VN Studio local AI server")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
-
 @app.middleware('http')
 async def protect_shared_server(request: Request, call_next):
     expected = os.environ.get('VN_SERVER_TOKEN', '').strip()
@@ -42,6 +40,8 @@ async def protect_shared_server(request: Request, call_next):
         if not secrets.compare_digest(supplied, expected):
             return JSONResponse(status_code=401, content={'detail': 'Неверный токен доступа к VN Studio AI server'})
     return await call_next(request)
+
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 # transformers lazy modules are NOT thread-safe on first import:
 # pre-import them once, single-threaded, at server startup.
