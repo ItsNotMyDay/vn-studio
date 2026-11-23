@@ -39,7 +39,7 @@ if not defined VN_SERVER_PORT set "VN_SERVER_PORT=8765"
 
 :: При сетевом доступе включаем общий bearer-токен.
 :: Не открывайте этот порт в интернет и используйте только доверенную локальную сеть.
-if /I "%VN_SERVER_HOST%"=="0.0.0.0" if not defined VN_SERVER_TOKEN (
+if /I not "%VN_SERVER_HOST%"=="127.0.0.1" if /I not "%VN_SERVER_HOST%"=="localhost" if not defined VN_SERVER_TOKEN (
     echo Для сетевого доступа задайте общий токен, который нужно будет ввести в VN Studio на клиентских ПК.
     set /p "VN_SERVER_TOKEN=Токен доступа к AI-серверу: "
     if not defined VN_SERVER_TOKEN (
