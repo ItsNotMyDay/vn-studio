@@ -1,6 +1,7 @@
-import { Handle, Position, NodeProps } from '@xyflow/react';
+import { Handle, Position } from '@xyflow/react';
+import type { NodeProps } from '@xyflow/react';
 import { GitBranch } from 'lucide-react';
-import { VNNode } from '../store/project';
+import type { VNNode } from '../store/project';
 
 export function ChoiceNode({ data, selected }: NodeProps<VNNode>) {
   const options = data.choice?.options ?? [];
