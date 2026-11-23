@@ -1,6 +1,7 @@
-import { Handle, Position, NodeProps } from '@xyflow/react';
+import { Handle, Position } from '@xyflow/react';
+import type { NodeProps } from '@xyflow/react';
 import { Square } from 'lucide-react';
-import { VNNode } from '../store/project';
+import type { VNNode } from '../store/project';
 
 export function EndNode({ selected }: NodeProps<VNNode>) {
   return (

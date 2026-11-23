@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Node, Edge } from '@xyflow/react';
+import type { Node, Edge } from '@xyflow/react';
 
 export type NodeType =
   | 'start'

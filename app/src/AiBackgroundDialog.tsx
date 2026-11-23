@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Image as ImageIcon, Sparkles, X, RefreshCw, Dice5, Square, Check, Loader2, Server, Wand2 } from 'lucide-react';
+import { Image as ImageIcon, X, RefreshCw, Dice5, Square, Check, Loader2, Server, Wand2 } from 'lucide-react';
 import { useStore } from './store';
 import {
   loadAiSettings, saveAiSettings, aiHealth, aiStartJob, aiPollJob, aiCancelJob, base64ToBlob,
@@ -110,11 +110,14 @@ export function AiBackgroundDialog({ open, onClose }: { open: boolean; onClose: 
         setStage(j.stage || 'Генерация фона…');
       }, ctl.signal, 15 * 60 * 1000);
       jobRef.current = null;
-      if (final.state !== 'done' || !final.result) throw new Error(final.message || 'Генерация не удалась');
-      const blob = base64ToBlob(final.result.image_base64, final.result.mime);
+      if (final.state !== 'done' || !final.result || !('image_base64' in final.result)) {
+        throw new Error(final.message || 'Сервер не вернул изображение');
+      }
+      const imageResult = final.result;
+      const blob = base64ToBlob(imageResult.image_base64, imageResult.mime);
       const url = URL.createObjectURL(blob);
-      setUsedSeed(final.result.seed ?? useSeed);
-      setResult({ url, blob, seed: final.result.seed ?? useSeed });
+      setUsedSeed(imageResult.seed ?? useSeed);
+      setResult({ url, blob, seed: imageResult.seed ?? useSeed });
       if (!name.trim()) setName(`AI-фон · ${(prompt.trim() || res.id).slice(0, 28)}`);
       setPhase('done');
       setStage('Готово');

@@ -1,6 +1,7 @@
-import { Handle, Position, NodeProps } from '@xyflow/react';
+import { Handle, Position } from '@xyflow/react';
+import type { NodeProps } from '@xyflow/react';
 import { Play } from 'lucide-react';
-import { VNNode } from '../store/project';
+import type { VNNode } from '../store/project';
 
 export function StartNode({ selected }: NodeProps<VNNode>) {
   return (

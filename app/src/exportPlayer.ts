@@ -207,7 +207,7 @@ function runtime(G: any) {
     else finish();
   }
 
-  function applyEntity(id: string, d: any) {
+  function applyEntity(d: any) {
     const kind = d.entityKind === 'sprite' ? 'sprite' : 'character';
     const refId = kind === 'character' ? d.characterId : d.spriteId;
     if (!refId) return;
@@ -238,11 +238,14 @@ function runtime(G: any) {
     renderEntities();
   }
 
+  let lastPauseId = '';
+
   function run(id: string) {
     if (++guard > 800) { finish(); return; }
     const n = node(id);
     if (!n) { finish(); return; }
     const d = n.data || {};
+    if (n.type === 'pause') lastPauseId = id;
     if (musicStops.indexOf(id) >= 0) { stopMusic(); musicStops = musicStops.filter(x => x !== id); }
     pending = null; choices.classList.remove('show'); choices.innerHTML = '';
     waitClick = false; pauseHint.classList.remove('show');
@@ -264,7 +267,7 @@ function runtime(G: any) {
         next(id); break;
       }
       case 'entity':
-        applyEntity(id, d);
+        applyEntity(d);
         fxUntil = Date.now() + (d.duration || 0.6) * 1000;
         next(id); break;
       case 'variable': {
@@ -276,7 +279,8 @@ function runtime(G: any) {
         else if (t === 'bool') vars[k] = d.op === 'toggle' ? !cur : d.op === 'and' ? (cur && val) : d.op === 'or' ? (cur || val) : val;
         else {
           const c = Number(cur) || 0;
-          vars[k] = d.op === 'add' ? c + val : d.op === 'sub' ? c - val : d.op === 'mul' ? c * val : val;
+          const numericVal = Number(val);
+          vars[k] = d.op === 'add' ? c + numericVal : d.op === 'sub' ? c - numericVal : d.op === 'mul' ? c * numericVal : numericVal;
           if (t === 'int') vars[k] = Math.round(vars[k]);
         }
         next(id); break;
@@ -360,10 +364,6 @@ function runtime(G: any) {
     const cur = scene.nodes.find((n: any) => n.type === 'dialogue' && n.data && n.data.text === line.text);
     if (cur) next(cur.id);
   }
-
-  let lastPauseId = '';
-  const origRun = run;
-  run = function (id: string) { const n = node(id); if (n && n.type === 'pause') lastPauseId = id; origRun(id); };
 
   stage.addEventListener('click', () => advance());
   window.addEventListener('keydown', e => {
