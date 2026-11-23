@@ -420,7 +420,7 @@ export async function llmSuggest(
 ): Promise<{ suggestions: LlmSuggestion[] }> {
   if (remote) {
     const system = 'Ты — опытный сценарист визуальных новелл. Предложи несколько живых реплик на русском языке с учётом характера персонажа, эмоции и контекста. Верни только валидный JSON без Markdown: {"suggestions":[{"text":"...","tone":"..."}]}';
-    const user = 'Количество вариантов: ' + count + '. Контекст:\\n' + JSON.stringify(context, null, 2);
+    const user = 'Количество вариантов: ' + count + '. Контекст:\n' + JSON.stringify(context, null, 2);
     const raw = await openAiChat(endpoint, remote, [{ role: 'system', content: system }, { role: 'user', content: user }], maxTokens, temp, signal);
     const match = raw.match(/\{[\s\S]*\}/);
     if (!match) throw new Error('OpenAI API не вернул JSON с вариантами');
