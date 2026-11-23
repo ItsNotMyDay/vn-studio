@@ -109,7 +109,7 @@ export function LlmChat() {
     refresh();
     const iv = setInterval(refresh, 8000);
     return () => { alive.current = false; clearInterval(iv); abortRef.current?.abort(); if (jobRef.current) aiCancelJob(endpoint, jobRef.current); };
-  }, [endpoint, aiCfg.llmProvider, aiCfg.openaiBaseUrl, aiCfg.openaiApiKey, aiCfg.openaiModel]);
+  }, [endpoint, aiCfg.llmProvider, aiCfg.openaiBaseUrl, aiCfg.openaiApiKey, aiCfg.openaiModel, aiCfg.serverToken]);
   useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [messages, pendingPlan, lastLog]);
 
   const push = (content: string) => setMessages(m => [...m, { role: 'assistant', content }]);
