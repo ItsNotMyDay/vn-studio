@@ -1317,9 +1317,9 @@ function AiModelsPanel() {
 
   const patch = (p: Partial<AiSettings>) => setCfg(saveAiSettings(p));
 
-  const openAddModel = () => {
+  const openAddModel = (kind: 'llm' | 'image' = 'llm') => {
     setHfUrl('');
-    setHfKind('llm');
+    setHfKind(kind);
     setApiBase(cfg.openaiBaseUrl);
     setApiKey(cfg.openaiApiKey);
     setApiModel(cfg.openaiModel);
@@ -1433,16 +1433,19 @@ function AiModelsPanel() {
     <Group title="AI-модели">
       <div className="space-y-2">
         <span className="block text-[10px] text-mute">Модель генерации изображений</span>
-        <select
-          className="select"
-          value={cfg.modelPath}
-          onChange={e => {
-            const item = imgOptions.find(o => o.path === e.target.value);
-            patch({ modelPath: e.target.value, modelId: item?.id ?? cfg.modelId });
-          }}
-        >
-          {imgOptions.map(o => <option key={o.path} value={o.path}>{o.id}</option>)}
-        </select>
+        <div className="flex gap-1.5">
+          <select
+            className="select min-w-0 flex-1"
+            value={cfg.modelPath}
+            onChange={e => {
+              const item = imgOptions.find(o => o.path === e.target.value);
+              patch({ modelPath: e.target.value, modelId: item?.id ?? cfg.modelId });
+            }}
+          >
+            {imgOptions.map(o => <option key={o.path} value={o.path}>{o.id}</option>)}
+          </select>
+          <button className="btn shrink-0" onClick={() => openAddModel('image')} title="Добавить модель"><Plus size={13} /> Добавить модель</button>
+        </div>
         <div className="flex flex-wrap gap-1.5">
           <span className="chip" style={{ borderColor: imgH?.model_loaded ? '#9dff5766' : '#3a4666', color: imgH?.model_loaded ? '#9dff57' : '#8d97b5' }}>
             {imgH?.model_loaded ? `${imgH.quant ?? ''} ${imgH.strategy ?? ''}`.trim() || 'загружена' : 'не загружена'}
@@ -1550,10 +1553,10 @@ function AiModelsPanel() {
                 <Download size={15} /> Скачать локально
                 <span className="block text-[10px] text-mute">Из публичного репозитория Hugging Face</span>
               </button>
-              <button className="btn justify-center !py-4" onClick={() => setAddMode('api')}>
+              {hfKind === 'llm' && <button className="btn justify-center !py-4" onClick={() => setAddMode('api')}>
                 <KeyRound size={15} /> API ключ
                 <span className="block text-[10px] text-mute">Удалённая модель по OpenAI API</span>
-              </button>
+              </button>}
             </div>
           )}
           {addMode === 'hf' && (
