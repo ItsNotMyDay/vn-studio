@@ -3,7 +3,7 @@ import {
   Play, Square, Undo2, Redo2, Save, Download, FileText, Volume2, VolumeX, Plus, Trash2,
   Search, GripVertical, Clapperboard, AlertTriangle, PanelLeft, PanelRight, RotateCcw, Shuffle,
   MessageSquare, GitBranch, Sigma, Image, Music, StopCircle, X, Settings, Upload, Sparkles,
-  RefreshCw, Loader2, Server, Database, Eye, UserRound, Package, FolderOpen
+  RefreshCw, Loader2, Server, Database, Eye, UserRound, Package, FolderOpen, KeyRound
 } from 'lucide-react';
 import type { Node } from '@xyflow/react';
 import {
@@ -1334,8 +1334,8 @@ function AiModelsPanel() {
   };
 
   const connectOpenAi = async () => {
-    if (!apiBase.trim() || !apiModel.trim()) {
-      s.toast('Укажите адрес API и ID модели');
+    if (!apiBase.trim()) {
+      s.toast('Укажите адрес API');
       return;
     }
     setApiChecking(true);
@@ -1404,6 +1404,7 @@ function AiModelsPanel() {
   if (cfg.llmPath && !llmOptions.some(o => o.path === cfg.llmPath)) llmOptions.unshift({ id: modelNameOf(cfg.llmPath), path: cfg.llmPath });
 
   return (
+    <>
     <Group title="AI-модели">
       <div className="space-y-2">
         <span className="block text-[10px] text-mute">Модель генерации изображений</span>
@@ -1450,7 +1451,7 @@ function AiModelsPanel() {
             {llmOptions.map(o => <option key={o.path} value={o.path}>{o.id}</option>)}
             <option value="__openai__">OpenAI API · {cfg.openaiModel || 'не настроен'}</option>
           </select>
-          <button className="btn shrink-0" onClick={openAddModel} title="Добавить модель"><Plus size={13} /> Добавить</button>
+          <button className="btn shrink-0" onClick={openAddModel} title="Добавить модель"><Plus size={13} /> Добавить модель</button>
         </div>
         {cfg.llmProvider === 'openai' ? (
           <>
@@ -1562,6 +1563,7 @@ function AiModelsPanel() {
         </div>
       </div>
     )}
+    </>
   );
 }
 
