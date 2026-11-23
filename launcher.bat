@@ -27,9 +27,8 @@ if not exist "%APP_DIR%\package.json" (
     exit /b 1
 )
 
-:: Очистка старых процессов
-echo Остановка старых процессов... >> "%ROOT_DIR%\launcher.log"
-taskkill /f /im python.exe 2>nul
+:: Не завершаем все процессы Python: AI-сервер может использоваться другими ПК.
+:: Если порт уже занят, проверьте существующий сервер перед запуском.
 
 :: Переменные для AI-сервера
 set VN_MODEL_PATH=C:\models\Qwen-Image-2.1-Turbo
@@ -84,7 +83,7 @@ cd /d "%APP_DIR%"
 call npm run tauri dev >> "%ROOT_DIR%\launcher.log" 2>&1
 
 :: Завершение
-echo Приложение закрыто. Остановка Python... >> "%ROOT_DIR%\launcher.log"
-taskkill /f /im python.exe 2>nul
+echo Приложение закрыто. AI-сервер продолжает работать отдельно. >> "%ROOT_DIR%\launcher.log"
+echo Для остановки сервера завершите процесс python.exe, запущенный из ai-server. >> "%ROOT_DIR%\launcher.log"
 echo Готово. >> "%ROOT_DIR%\launcher.log"
 del "%ROOT_DIR%\health.tmp" 2>nul
