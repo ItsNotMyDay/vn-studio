@@ -1311,8 +1311,7 @@ function AiModelsPanel() {
       }
     };
     tick();
-    const iv = setInterval(tick, 8000);
-    return () => { alive = false; clearInterval(iv); };
+    return () => { alive = false; };
   }, [ep, cfg.llmProvider, cfg.openaiBaseUrl, cfg.openaiApiKey, cfg.openaiModel, cfg.serverToken]);
 
   const patch = (p: Partial<AiSettings>) => setCfg(saveAiSettings(p));
