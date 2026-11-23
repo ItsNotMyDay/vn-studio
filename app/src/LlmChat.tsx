@@ -109,7 +109,7 @@ export function LlmChat() {
     refresh();
     const iv = setInterval(refresh, 8000);
     return () => { alive.current = false; clearInterval(iv); abortRef.current?.abort(); if (jobRef.current) aiCancelJob(endpoint, jobRef.current); };
-  }, [endpoint, aiCfg.llmProvider, aiCfg.openaiBaseUrl, aiCfg.openaiApiKey, aiCfg.openaiModel, aiCfg.serverToken]);
+  }, [endpoint, aiCfg.llmProvider, aiCfg.llmPath, aiCfg.openaiBaseUrl, aiCfg.openaiApiKey, aiCfg.openaiModel, aiCfg.serverToken]);
   useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [messages, pendingPlan, lastLog]);
 
   const push = (content: string) => setMessages(m => [...m, { role: 'assistant', content }]);
@@ -118,7 +118,7 @@ export function LlmChat() {
     setLoadingModel(true);
     setLoadProg({ p: 0, stage: 'Старт…' });
     try {
-      const r = await llmLoadJob(endpoint, null, (p, stage) => setLoadProg({ p, stage }));
+      const r = await llmLoadJob(endpoint, aiCfg.llmPath || null, (p, stage) => setLoadProg({ p, stage }));
       if (r.ok) { setStatus(st => ({ ...st, loaded: true, error: null })); s.toast('LLM загружена и готова'); }
       else s.toast(`Ошибка загрузки LLM: ${r.error ?? 'неизвестно'}`);
     } catch (e: any) { s.toast(`Ошибка: ${e?.message ?? e}`); }
