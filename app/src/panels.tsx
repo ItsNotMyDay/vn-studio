@@ -1522,7 +1522,7 @@ function AiModelsPanel() {
         <div className="panel border border-ink-600 rounded-2xl w-[min(520px,94vw)] p-4 shadow-2xl space-y-3" onClick={e => e.stopPropagation()}>
           <div className="flex items-center gap-2">
             <Package size={16} style={{ color: 'var(--accent)' }} />
-            <span className="font-bold text-[13px]">Добавить языковую модель</span>
+            <span className="font-bold text-[13px]">Добавить модель</span>
             <div className="flex-1" />
             <button className="btn !px-2" disabled={downloadProg.on || apiChecking} onClick={() => setAddMode(null)}><X size={13} /></button>
           </div>
@@ -1565,7 +1565,7 @@ function AiModelsPanel() {
               <input className="input" type="password" autoComplete="new-password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="sk-…" />
               <label className="block text-[11px] text-mute">ID модели</label>
               <input className="input" value={apiModel} onChange={e => setApiModel(e.target.value)} placeholder="gpt-4o-mini" />
-              <div className="text-[10px] text-mute">Ключ провайдера хранится в локальных настройках этого приложения на текущем ПК и передаётся AI-серверу только при запросах. Для сетевых адресов HTTP используй только доверенную локальную сеть.</div>
+              <div className="text-[10px] text-mute">API-ключ и токен доступа хранятся в локальных настройках приложения на этом ПК. API-ключ передаётся AI-серверу только при запросах. Для сетевых адресов HTTP используй только доверенную локальную сеть.</div>
               <div className="flex gap-2">
                 <button className="btn btn-primary flex-1 justify-center" disabled={apiChecking} onClick={connectOpenAi}>
                   {apiChecking ? <Loader2 size={12} className="animate-spin" /> : <Server size={12} />} Проверить и подключить
