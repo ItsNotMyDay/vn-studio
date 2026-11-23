@@ -1297,6 +1297,24 @@ function AiModelsPanel() {
     return () => { alive = false; clearInterval(iv); };
   }, [ep]);
 
+  useEffect(() => {
+    if (cfg.llmProvider !== 'openai') { setRemoteOk(null); return; }
+    let alive = true;
+    const tick = async () => {
+      try {
+        const models = await openAiListModels(ep, { baseUrl: cfg.openaiBaseUrl, apiKey: cfg.openaiApiKey });
+        const ids = (models.data ?? []).map(item => item.id);
+        const valid = !cfg.openaiModel || !ids.length || ids.includes(cfg.openaiModel);
+        if (alive) setRemoteOk(valid);
+      } catch {
+        if (alive) setRemoteOk(false);
+      }
+    };
+    tick();
+    const iv = setInterval(tick, 8000);
+    return () => { alive = false; clearInterval(iv); };
+  }, [ep, cfg.llmProvider, cfg.openaiBaseUrl, cfg.openaiApiKey, cfg.openaiModel, cfg.serverToken]);
+
   const patch = (p: Partial<AiSettings>) => setCfg(saveAiSettings(p));
 
   const openAddModel = () => {
