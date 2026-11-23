@@ -105,11 +105,14 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
         seed,
         transparent: cfg.transparent,
       }, 'Диффузия');
-      if (!final.result) throw new Error('Сервер не вернул изображение');
-      const blob = base64ToBlob(final.result.image_base64, final.result.mime);
+      if (!final.result || !('image_base64' in final.result)) {
+        throw new Error('Сервер не вернул изображение');
+      }
+      const imageResult = final.result;
+      const blob = base64ToBlob(imageResult.image_base64, imageResult.mime);
       const url = URL.createObjectURL(blob);
-      setUsedSeed(final.result.seed ?? seed);
-      setResult({ url, blob, source: 'ai', seed: final.result.seed ?? seed });
+      setUsedSeed(imageResult.seed ?? seed);
+      setResult({ url, blob, source: 'ai', seed: imageResult.seed ?? seed });
       setPhase('done'); setStage('Готово'); setProgress(1);
       setHealth(hh => ({ ...hh, model_loaded: true }));
     } catch (e: any) {
