@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { MessageSquare, Send, Loader2, X, Server, Trash2, RefreshCw, Square, Database, BookOpen, Wrench, Check, Ban, Undo2 } from 'lucide-react';
 import { useStore } from './store';
-import { llmHealth, llmLoadJob, llmChat, aiCancelJob, embeddingsSearch, embeddingsIndex, type LlmMessage, type RichContext } from './ai';
+import { llmHealth, llmLoadJob, llmChat, aiCancelJob, embeddingsSearch, embeddingsIndex, loadAiSettings, openAiListModels, type AiSettings, type LlmMessage, type RichContext } from './ai';
 import { TOOLS_DOC, canvasSnapshot, parsePlan, executePlan, describeAction, type AgentPlan, type ExecResult } from './agentTools';
 
 function normalizeEndpoint(ep?: string) {
@@ -50,6 +50,10 @@ function sceneToText(sc: any, project: any): string {
 export function LlmChat() {
   const s = useStore();
   const endpoint = normalizeEndpoint(s.director.aiEndpoint);
+  const [aiCfg, setAiCfg] = useState<AiSettings>(loadAiSettings());
+  const remote = aiCfg.llmProvider === 'openai'
+    ? { baseUrl: aiCfg.openaiBaseUrl, apiKey: aiCfg.openaiApiKey, model: aiCfg.openaiModel }
+    : undefined;
   const [messages, setMessages] = useState<LlmMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -76,18 +80,36 @@ export function LlmChat() {
 
   const refresh = async () => {
     try {
-      const h = await llmHealth(endpoint);
-      if (alive.current) setStatus({ online: true, loaded: !!h.loaded, path: h.path, device: h.device, error: h.error });
-    } catch {
-      if (alive.current) setStatus(st => ({ ...st, online: false, loaded: false }));
+      if (aiCfg.llmProvider === 'openai') {
+        const result = await openAiListModels(endpoint, { baseUrl: aiCfg.openaiBaseUrl, apiKey: aiCfg.openaiApiKey });
+        const ids = (result.data ?? []).map(item => item.id);
+        const connected = !!aiCfg.openaiModel && (!ids.length || ids.includes(aiCfg.openaiModel));
+        if (alive.current) setStatus({
+          online: true,
+          loaded: connected,
+          path: aiCfg.openaiModel,
+          device: 'OpenAI API',
+          error: connected ? undefined : 'Модель не найдена в ответе /models',
+        });
+      } else {
+        const h = await llmHealth(endpoint);
+        if (alive.current) setStatus({ online: true, loaded: !!h.loaded, path: h.path, device: h.device, error: h.error });
+      }
+    } catch (error: any) {
+      if (alive.current) setStatus({ online: false, loaded: false, error: error?.message ?? 'нет соединения' });
     }
   };
+  useEffect(() => {
+    const updateSettings = () => setAiCfg(loadAiSettings());
+    window.addEventListener('vn-studio-ai-settings', updateSettings);
+    return () => window.removeEventListener('vn-studio-ai-settings', updateSettings);
+  }, []);
   useEffect(() => {
     alive.current = true;
     refresh();
     const iv = setInterval(refresh, 8000);
     return () => { alive.current = false; clearInterval(iv); abortRef.current?.abort(); if (jobRef.current) aiCancelJob(endpoint, jobRef.current); };
-  }, [endpoint]);
+  }, [endpoint, aiCfg.llmProvider, aiCfg.openaiBaseUrl, aiCfg.openaiApiKey, aiCfg.openaiModel]);
   useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [messages, pendingPlan, lastLog]);
 
   const push = (content: string) => setMessages(m => [...m, { role: 'assistant', content }]);
@@ -158,7 +180,7 @@ export function LlmChat() {
 
   const runAgentTurn = async (history: LlmMessage[], systemText: string) => {
     const reply = await llmChat(endpoint, [{ role: 'system', content: systemText }, ...history], 700, 0.35,
-      undefined, id => { jobRef.current = id; }, abortRef.current?.signal);
+      undefined, id => { jobRef.current = id; }, abortRef.current?.signal, remote);
     jobRef.current = null;
     const plan = parsePlan(reply);
     if (plan && plan.actions?.length) {
@@ -193,7 +215,7 @@ export function LlmChat() {
         setMessages([...history, { role: 'assistant', content: '' }]);
         const reply = await llmChat(endpoint, [{ role: 'system', content: systemText }, ...history], 512, 0.7, partial => {
           setMessages(m => { const cp = [...m]; cp[cp.length - 1] = { role: 'assistant', content: partial }; return cp; });
-        }, id => { jobRef.current = id; }, ctl.signal);
+        }, id => { jobRef.current = id; }, ctl.signal, remote);
         jobRef.current = null;
         setMessages(m => { const cp = [...m]; cp[cp.length - 1] = { role: 'assistant', content: reply }; return cp; });
       }
@@ -350,7 +372,7 @@ export function LlmChat() {
 
       {!status.online && (
         <div className="px-3 py-2 border-t border-ink-700 space-y-1.5 text-left">
-          <div className="text-[11px] text-danger leading-snug text-left">Сервер генерации не отвечает по адресу {endpoint}. Запустите ai-server/server.py.</div>
+          <div className="text-[11px] text-danger leading-snug text-left">{aiCfg.llmProvider === 'openai' ? 'OpenAI API недоступен через AI-сервер ' + endpoint + '. Проверь адрес, API key и токен доступа.' : 'Сервер генерации не отвечает по адресу ' + endpoint + '. Запустите ai-server/server.py.'}</div>
           <button className="btn w-full justify-center" onClick={refresh}><RefreshCw size={13} /> Повторить</button>
         </div>
       )}
