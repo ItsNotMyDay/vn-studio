@@ -1270,6 +1270,7 @@ function AiModelsPanel() {
   );
   const [addMode, setAddMode] = useState<null | 'menu' | 'hf' | 'api'>(null);
   const [hfUrl, setHfUrl] = useState('');
+  const [hfKind, setHfKind] = useState<'llm' | 'image'>('llm');
   const [downloadProg, setDownloadProg] = useState<{ on: boolean; p: number; stage: string }>({ on: false, p: 0, stage: '' });
   const [apiBase, setApiBase] = useState(cfg.openaiBaseUrl);
   const [apiKey, setApiKey] = useState(cfg.openaiApiKey);
@@ -1296,6 +1297,7 @@ function AiModelsPanel() {
 
   const openAddModel = () => {
     setHfUrl('');
+    setHfKind('llm');
     setApiBase(cfg.openaiBaseUrl);
     setApiKey(cfg.openaiApiKey);
     setApiModel(cfg.openaiModel);
@@ -1319,13 +1321,14 @@ function AiModelsPanel() {
 
     setDownloadProg({ on: true, p: 0, stage: 'Подключение…' });
     try {
-      const model = await aiDownloadHfModel(ep, repoId, 'llm', (p, stage) => {
+      const model = await aiDownloadHfModel(ep, repoId, hfKind, (p, stage) => {
         setDownloadProg({ on: true, p, stage });
       });
-      patch({ llmPath: model.path, llmProvider: 'local' });
+      if (hfKind === 'llm') patch({ llmPath: model.path, llmProvider: 'local' });
+      else patch({ modelPath: model.path, modelId: model.id });
       setList(await aiListModels(ep));
       setAddMode(null);
-      s.toast('Модель скачана и добавлена в список');
+      s.toast(hfKind === 'llm' ? 'Языковая модель скачана и добавлена в список' : 'Модель генерации изображений скачана и добавлена в список');
     } catch (error: any) {
       s.toast('Ошибка скачивания: ' + (error?.message ?? error));
     } finally {
@@ -1497,6 +1500,8 @@ function AiModelsPanel() {
           placeholder="http://192.168.1.10:8765"
         />
         <span className="block text-[10px] text-mute">Для другого ПК укажи сетевой адрес компьютера, на котором запущен ai-server.</span>
+        <label className="block text-[10px] text-mute">Токен доступа к AI-серверу (если включена защита)</label>
+        <input className="input" type="password" autoComplete="new-password" value={cfg.serverToken} onChange={e => patch({ serverToken: e.target.value })} placeholder="Общий токен с компьютера-сервера" />
       </div>
 
       <div className="border-t border-ink-700 pt-2 flex flex-wrap items-center gap-1.5">
@@ -1531,9 +1536,14 @@ function AiModelsPanel() {
           )}
           {addMode === 'hf' && (
             <div className="space-y-2">
+              <label className="block text-[11px] text-mute">Тип модели</label>
+              <select className="select" value={hfKind} onChange={e => setHfKind(e.target.value as 'llm' | 'image')}>
+                <option value="llm">Языковая модель (LLM)</option>
+                <option value="image">Модель генерации изображений (Diffusers)</option>
+              </select>
               <label className="block text-[11px] text-mute">Ссылка на модель на huggingface.co</label>
               <input className="input" value={hfUrl} onChange={e => setHfUrl(e.target.value)} placeholder="https://huggingface.co/Qwen/Qwen3-14B" />
-              <div className="text-[10px] text-mute">Модель будет скачана на компьютер с AI-сервером в папку моделей. Поддерживаются репозитории Transformers с config.json; GGUF пока не поддерживается.</div>
+              <div className="text-[10px] text-mute">Модель будет скачана на компьютер с AI-сервером в папку моделей. Для LLM нужен репозиторий Transformers с config.json; для изображений — Diffusers с model_index.json. GGUF пока не поддерживается.</div>
               {downloadProg.on && <ProgressBar p={downloadProg.p} stage={downloadProg.stage} />}
               <div className="flex gap-2">
                 <button className="btn flex-1 justify-center" disabled={downloadProg.on || !hfUrl.trim()} onClick={downloadFromHf}>
@@ -1551,7 +1561,7 @@ function AiModelsPanel() {
               <input className="input" type="password" autoComplete="new-password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="sk-…" />
               <label className="block text-[11px] text-mute">ID модели</label>
               <input className="input" value={apiModel} onChange={e => setApiModel(e.target.value)} placeholder="gpt-4o-mini" />
-              <div className="text-[10px] text-mute">Ключ хранится в локальных настройках этого приложения на текущем ПК и передаётся AI-серверу только при запросах. Для сетевых адресов HTTP используй только доверенную локальную сеть.</div>
+              <div className="text-[10px] text-mute">Ключ провайдера хранится в локальных настройках этого приложения на текущем ПК и передаётся AI-серверу только при запросах. Для сетевых адресов HTTP используй только доверенную локальную сеть.</div>
               <div className="flex gap-2">
                 <button className="btn btn-primary flex-1 justify-center" disabled={apiChecking} onClick={connectOpenAi}>
                   {apiChecking ? <Loader2 size={12} className="animate-spin" /> : <Server size={12} />} Проверить и подключить
