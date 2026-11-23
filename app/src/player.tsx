@@ -9,33 +9,46 @@ import { DirectorConsole, Toasts } from './panels';
 import { subscribe, post } from './bus';
 import { audioSetVolume } from './audio';
 
+let lastPlayRequestId: string | null = null;
+
 function PlayerApp() {
   const s = useStore();
   const scene = s.scene();
   const bg = s.project.backgrounds.find(b => b.id === s.player.bg);
   const track = s.project.tracks.find(t => t.id === s.player.track);
 
-  useEffect(() => subscribe(m => {
-    const st = useStore.getState();
-    if (m.type === 'project') {
-      useStore.setState({ project: m.project });
-    } else if (m.type === 'director') {
-      useStore.setState({ director: m.director });
-    } else if (m.type === 'scene') {
-      st.stop();
-      useStore.setState({ currentSceneId: m.sceneId });
-    } else if (m.type === 'play') {
-      if (m.project) useStore.setState({ project: m.project });
-      if (m.director) useStore.setState({ director: m.director });
-      useStore.setState({ currentSceneId: m.sceneId });
-      useStore.getState().play();
-      post({ type: 'playing', sceneId: m.sceneId });
-    } else if (m.type === 'stop') {
-      st.stop();
-    }
-  }), []);
+  useEffect(() => {
+    const unsubscribe = subscribe(m => {
+      const st = useStore.getState();
+      if (m.type === 'project') {
+        useStore.setState({ project: m.project });
+      } else if (m.type === 'director') {
+        useStore.setState({ director: m.director });
+      } else if (m.type === 'scene') {
+        st.stop();
+        useStore.setState({ currentSceneId: m.sceneId });
+      } else if (m.type === 'play') {
+        // BroadcastChannel and the storage fallback can both deliver the request.
+        // Do not restart the same launch when the editor retries after "ready".
+        if (m.requestId && lastPlayRequestId === m.requestId) return;
+        if (m.requestId) lastPlayRequestId = m.requestId;
 
-  useEffect(() => { post({ type: 'request-sync' }); }, []);
+        if (m.project) useStore.setState({ project: m.project });
+        if (m.director) useStore.setState({ director: m.director });
+        useStore.setState({ currentSceneId: m.sceneId });
+        useStore.getState().play();
+        post({ type: 'playing', sceneId: m.sceneId, requestId: m.requestId });
+      } else if (m.type === 'stop') {
+        st.stop();
+      }
+    });
+
+    // Signal only after the message listeners are attached. The editor can then
+    // safely resend a launch request that may have arrived too early.
+    post({ type: 'ready' });
+    post({ type: 'request-sync' });
+    return unsubscribe;
+  }, []);
   useEffect(() => { audioSetVolume(s.director.volume); }, [s.director.volume]);
   useEffect(() => {
     document.documentElement.style.setProperty('--accent', s.director.accent);

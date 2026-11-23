@@ -51,31 +51,70 @@ export function consumePendingPlay(): any {
 
 export function ackPlaying() { pendingPlay = null; }
 
-export async function openPlayerWindow() {
+// The editor owns the launch request until the player confirms that it started.
+let mainBusUnsubscribe: (() => void) | null = null;
+
+export function startMainBus() {
+  if (mainBusUnsubscribe) return;
+  mainBusUnsubscribe = subscribe(m => {
+    if (m.type === 'ready') {
+      // The first play message may have been sent before the new window subscribed.
+      if (pendingPlay) post(pendingPlay);
+      return;
+    }
+    if (m.type === 'request-sync') {
+      if (pendingPlay) post(pendingPlay);
+      else syncToPlayer();
+      return;
+    }
+    if (m.type === 'playing' && pendingPlay && m.requestId === pendingPlay.requestId) {
+      pendingPlay = null;
+    }
+  });
+}
+
+export async function openPlayerWindow(): Promise<boolean> {
   const w = window as any;
   if (w.__TAURI_INTERNALS__) {
     try {
       const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
       const existing = await WebviewWindow.getByLabel('player');
-      if (existing) { await existing.show(); await existing.setFocus(); return; }
+      if (existing) {
+        await existing.show();
+        await existing.setFocus();
+        return true;
+      }
       new WebviewWindow('player', {
         url: 'player.html',
         title: 'VN Studio — Плеер',
         width: 1280, height: 760, minWidth: 900, minHeight: 560, center: true,
       });
-      return;
+      return true;
     } catch {}
   }
   const opened = window.open('/player.html', 'vnplayer', 'width=1280,height=760');
   if (opened) opened.focus();
+  return !!opened;
 }
 
 export async function launchPlayer(sceneId: string) {
+  startMainBus();
   flushProject();
   const st = useStore.getState();
-  const payload = { type: 'play', sceneId, project: st.project, director: st.director };
+  const payload = {
+    type: 'play',
+    requestId: `${Date.now()}_${Math.random().toString(36).slice(2)}`,
+    sceneId,
+    project: st.project,
+    director: st.director,
+  };
   pendingPlay = payload;
-  await openPlayerWindow();
+  const opened = await openPlayerWindow();
+  if (!opened) {
+    if (pendingPlay === payload) pendingPlay = null;
+    return;
+  }
+  // Send immediately for an already-open player. A newly-created player will also
+  // receive the same request after it posts "ready" from its subscription effect.
   post(payload);
-  setTimeout(() => { if (pendingPlay === payload) pendingPlay = null; }, 8000);
 }
