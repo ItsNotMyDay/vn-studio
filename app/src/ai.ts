@@ -196,7 +196,7 @@ async function openAiProxy<T>(endpoint: string, path: string, payload: unknown, 
     const headers = new Headers({ 'Content-Type': 'application/json' });
     const serverToken = getAiServerToken();
     if (serverToken) headers.set('Authorization', 'Bearer ' + serverToken);
-    const response = await fetch(endpoint.replace(/\\/+$/, '') + path, { method: 'POST', headers, body: JSON.stringify(payload), signal: ctl.signal });
+    const response = await fetch(endpoint.replace(/\/+$/, '') + path, { method: 'POST', headers, body: JSON.stringify(payload), signal: ctl.signal });
     if (!response.ok) { const detail = await response.text(); throw new Error('OpenAI API · HTTP ' + response.status + ': ' + detail.slice(0, 500)); }
     return await response.json() as T;
   } catch (error: any) {
