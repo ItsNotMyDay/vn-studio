@@ -2,11 +2,11 @@ import { memo } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import {
   Play, MessageSquare, GitBranch, Sigma, Image as ImageIcon, Music, UserRound, Square as StopIcon,
-  Move, Eye, EyeOff, Dice5, Type, Hash, Percent, ToggleLeft, Timer, Navigation, Link2
+  Move, Eye, EyeOff, Type, Hash, Percent, ToggleLeft, Timer, Navigation
 } from 'lucide-react';
 import {
   useStore, KIND_META, VAR_TYPES, VAR_OPS, ENTITY_EFFECTS,
-  type NodeKind, type VarType, type ChoiceCondition, moveCss, MOVE_EFFECTS
+  type NodeKind, type VarType, type ChoiceCondition, MOVE_EFFECTS
 } from './store';
 import { useAssetURL } from './assets';
 
