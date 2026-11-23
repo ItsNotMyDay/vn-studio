@@ -42,3 +42,24 @@ models/
 *.onnx
 *.safetensors
 '@ | Set-Content -Path .gitignore -Encoding ASCII
+
+# Embedded Python environment
+ai-server/python312/
+
+# Python cache
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Python virtual environment
+ai-server/.venv312/
+ai-server/python312/
+
+# Python cache
+**/__pycache__/
+*.py[cod]
+
+# Generated local data
+ai-server/embeddings/

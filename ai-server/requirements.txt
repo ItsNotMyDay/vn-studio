@@ -1,0 +1,11 @@
+fastapi>=0.115
+uvicorn>=0.30
+pydantic>=2.7
+torch>=2.3
+diffusers>=0.35
+transformers>=4.51
+accelerate>=0.33
+safetensors>=0.4
+pillow>=10.3
+rembg>=2.0.57
+onnxruntime>=1.18

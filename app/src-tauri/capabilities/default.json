@@ -1,15 +1,15 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "enables the default permissions",
-  "windows": [
-    "main"
-  ],
+  "description": "VN Studio capabilities",
+  "windows": ["main", "player"],
   "permissions": [
+    "core:default",
+    "core:window:allow-close",
+    "core:window:allow-show",
+    "core:window:allow-set-focus",
+    "core:webview:allow-create-webview-window",
     "dialog:default",
-    "fs:default",
-    "fs:allow-read",
-    "fs:allow-write",
-    "fs:allow-mkdir"
+    "fs:default"
   ]
 }
