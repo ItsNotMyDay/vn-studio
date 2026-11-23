@@ -694,8 +694,12 @@ export function Inspector() {
     try {
       const ctx = await s.buildRichContext(n.id);
       const { llmSuggest } = await import('./ai');
+      const aiCfg = loadAiSettings();
+      const remote = aiCfg.llmProvider === 'openai'
+        ? { baseUrl: aiCfg.openaiBaseUrl, apiKey: aiCfg.openaiApiKey, model: aiCfg.openaiModel }
+        : undefined;
       const res = await llmSuggest(s.director.aiEndpoint ?? 'http://127.0.0.1:8765', ctx, count, 512, 0.85,
-        id => { suggestJob.current = id; }, ctl.signal);
+        id => { suggestJob.current = id; }, ctl.signal, remote);
       if (res.suggestions?.length) setSuggestions(res.suggestions);
       else s.toast('Модель не предложила вариантов');
     } catch (e: any) {
