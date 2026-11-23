@@ -7,6 +7,10 @@ import glob
 import shutil
 import threading
 import uuid
+import re
+import urllib.error
+import urllib.request
+import secrets
 from typing import Optional
 
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
@@ -14,8 +18,9 @@ if os.name != "nt":
     os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 MODEL_ID_DEFAULT = os.environ.get("VN_MODEL_ID", "qwen_image_2.1_turbo_int8_convrot")
@@ -26,6 +31,16 @@ TOKENIZER_FALLBACK_REPO = os.environ.get("VN_TOKENIZER_REPO", "Qwen/Qwen-Image")
 LLM_PATH_DEFAULT = os.environ.get("VN_LLM_PATH", "C:\\models\\qwen3-14b")
 
 app = FastAPI(title="VN Studio local AI server")
+@app.middleware('http')
+async def protect_shared_server(request: Request, call_next):
+    expected = os.environ.get('VN_SERVER_TOKEN', '').strip()
+    if expected and request.url.path != '/health' and request.method != 'OPTIONS':
+        authorization = request.headers.get('authorization', '')
+        supplied = authorization[7:].strip() if authorization.lower().startswith('bearer ') else ''
+        if not secrets.compare_digest(supplied, expected):
+            return JSONResponse(status_code=401, content={'detail': 'Неверный токен доступа к VN Studio AI server'})
+    return await call_next(request)
+
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 # transformers lazy modules are NOT thread-safe on first import:
@@ -221,6 +236,20 @@ class LlmSuggestReq(BaseModel):
     max_tokens: int = 320
     temperature: float = 0.85
     count: int = 3
+
+class OpenAiConnectionReq(BaseModel):
+    base_url: str
+    api_key: str = ''
+
+class OpenAiChatReq(OpenAiConnectionReq):
+    model: str
+    messages: list
+    max_tokens: int = 512
+    temperature: float = 0.7
+
+class ModelDownloadReq(BaseModel):
+    repo_id: str
+    kind: str = 'llm'
 
 # ============================================================
 # Common helpers
@@ -740,6 +769,31 @@ def _suggest_impl(req: LlmSuggestReq, cancel_check=None):
 # Worker and job queue
 # ============================================================
 
+def _download_hf_model(req: ModelDownloadReq, job: dict):
+    repo_id = req.repo_id.strip()
+    if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repo_id):
+        raise ValueError('Укажите корректный Hugging Face repo ID: owner/model')
+    if req.kind not in ('llm', 'image'):
+        raise ValueError('Тип модели должен быть llm или image')
+    model_root = SEARCH_DIRS[0] or os.path.join(os.path.dirname(__file__), 'models')
+    os.makedirs(model_root, exist_ok=True)
+    folder = repo_id.replace('/', '--')
+    target = os.path.abspath(os.path.join(model_root, folder))
+    if os.path.commonpath([os.path.abspath(model_root), target]) != os.path.abspath(model_root):
+        raise ValueError('Недопустимый путь для сохранения модели')
+    job['stage'] = 'Подготовка загрузки с Hugging Face…'
+    job['progress'] = 0.02
+    from huggingface_hub import snapshot_download
+    job['stage'] = 'Скачивание ' + repo_id + ' (возможна большая загрузка)…'
+    snapshot_download(repo_id=repo_id, local_dir=target)
+    if req.kind == 'llm' and not os.path.isfile(os.path.join(target, 'config.json')):
+        raise RuntimeError('В репозитории нет config.json. Для локальной LLM нужна модель формата Transformers; GGUF пока не поддерживается.')
+    if req.kind == 'image' and not os.path.isfile(os.path.join(target, 'model_index.json')):
+        raise RuntimeError('В репозитории нет model_index.json. Это не Diffusers-модель.')
+    job['progress'] = 1.0
+    job['stage'] = 'Загрузка завершена'
+    return {'id': folder, 'path': target, 'kind': req.kind}
+
 def worker():
     while True:
         WAKE.wait()
@@ -753,7 +807,9 @@ def worker():
             job["state"] = "running"
             try:
                 kind = job["kind"]
-                if kind == "load":
+                if kind == "download":
+                    job["result"] = _download_hf_model(job["req"], job)
+                elif kind == "load":
                     load_model(job["req"].model_id, job["req"].model_path or "", job)
                 elif kind == "llm_load":
                     _llm_load_with_progress(job)
@@ -819,6 +875,10 @@ def health():
             "queue": len(QUEUE),
             "error": STATE["error"],
         }
+
+@app.post("/models/download")
+def models_download(req: ModelDownloadReq):
+    return {"job_id": enqueue("download", req)}
 
 @app.post("/model/load")
 def model_load(req: LoadReq):
@@ -942,11 +1002,57 @@ def models_list():
         embed.append({"id": os.path.basename(EMBED_PATH_DEFAULT), "path": EMBED_PATH_DEFAULT})
     return {"image": image, "llm": llm, "embed": embed}
 
+def _openai_request(base_url: str, api_key: str, path: str, payload: Optional[dict] = None):
+    base = base_url.strip().rstrip('/')
+    if not base.startswith(('https://', 'http://')):
+        raise HTTPException(400, 'Адрес OpenAI API должен начинаться с http:// или https://')
+    headers = {'Accept': 'application/json'}
+    if api_key.strip():
+        headers['Authorization'] = 'Bearer ' + api_key.strip()
+    data = None
+    method = 'GET'
+    if payload is not None:
+        data = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+        headers['Content-Type'] = 'application/json'
+        method = 'POST'
+    request = urllib.request.Request(base + path, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=180) as response:
+            return json.loads(response.read().decode('utf-8'))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode('utf-8', errors='replace')[:1000]
+        raise HTTPException(exc.code, detail or str(exc))
+    except urllib.error.URLError as exc:
+        raise HTTPException(502, 'Не удалось подключиться к OpenAI API: ' + str(exc.reason))
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(502, 'OpenAI API вернул некорректный JSON: ' + str(exc))
+
 @app.get("/llm/health")
 def llm_health():
     with LOCK:
         return {"loaded": LLM_STATE["loaded"], "path": LLM_STATE["path"],
                 "device": LLM_STATE["device"], "error": LLM_STATE["error"]}
+
+@app.post("/openai/models")
+def openai_models(req: OpenAiConnectionReq):
+    return _openai_request(req.base_url, req.api_key, '/models')
+
+@app.post("/openai/chat")
+def openai_chat(req: OpenAiChatReq):
+    payload = {
+        'model': req.model,
+        'messages': req.messages,
+        'max_tokens': req.max_tokens,
+        'temperature': req.temperature,
+    }
+    result = _openai_request(req.base_url, req.api_key, '/chat/completions', payload)
+    try:
+        content = result['choices'][0]['message']['content']
+        if isinstance(content, list):
+            content = ''.join(str(part.get('text', '')) for part in content if isinstance(part, dict))
+        return {'reply': str(content or '')}
+    except (KeyError, IndexError, TypeError):
+        raise HTTPException(502, 'OpenAI API не вернул choices[0].message.content')
 
 @app.post("/llm/chat")
 def llm_chat(req: LlmChatReq):
