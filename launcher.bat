@@ -2,16 +2,16 @@
 chcp 65001 >nul
 title VN Studio Launcher
 
-set ROOT_DIR=C:\Users\Кирилл\Projects\vn-studio
-set AI_DIR=%ROOT_DIR%\ai-server
-set APP_DIR=%ROOT_DIR%\app
-set PYTHON_PATH=%AI_DIR%\python312\python.exe
+set "ROOT_DIR=%~dp0"
+set "AI_DIR=%ROOT_DIR%ai-server"
+set "APP_DIR=%ROOT_DIR%app"
+set "PYTHON_PATH=%AI_DIR%\python312\python.exe"
 
 :: Логирование
 echo [%date% %time%] Старт launcher.bat > "%ROOT_DIR%\launcher.log"
 
 :: Пути к Node.js
-set PATH=C:\Program Files\nodejs;C:\Users\Кирилл\AppData\Roaming\npm;%PATH%
+set "PATH=C:\Program Files\nodejs;%APPDATA%\npm;%PATH%"
 echo PATH установлен >> "%ROOT_DIR%\launcher.log"
 
 :: Проверки
@@ -56,7 +56,7 @@ echo VN_LLM_PATH=%VN_LLM_PATH% >> "%ROOT_DIR%\launcher.log"
 echo VN_EMBED_PATH=%VN_EMBED_PATH% >> "%ROOT_DIR%\launcher.log"
 
 pushd "%AI_DIR%"
-start "" /b cmd /c ""%PYTHON_PATH%" -m uvicorn server:app --host %VN_SERVER_HOST% --port %VN_SERVER_PORT%"
+start "VN Studio AI Server" /min cmd /c ""%PYTHON_PATH%" -m uvicorn server:app --host %VN_SERVER_HOST% --port %VN_SERVER_PORT%"
 popd
 
 :: Ожидание готовности сервера (30 секунд с проверкой через curl)
@@ -77,13 +77,19 @@ exit /b 1
 :server_ready
 echo AI-сервер готов >> "%ROOT_DIR%\launcher.log"
 
+if /I "%VN_SERVER_ONLY%"=="1" (
+    echo AI-сервер запущен в отдельном свернутом окне "VN Studio AI Server".
+    echo Для остановки сервера закройте это окно.
+    exit /b 0
+)
+
 :: Запуск Tauri приложения
 echo Запуск Tauri (npm run tauri dev)... >> "%ROOT_DIR%\launcher.log"
 cd /d "%APP_DIR%"
 call npm run tauri dev >> "%ROOT_DIR%\launcher.log" 2>&1
 
 :: Завершение
-echo Приложение закрыто. AI-сервер продолжает работать отдельно. >> "%ROOT_DIR%\launcher.log"
-echo Для остановки сервера завершите процесс python.exe, запущенный из ai-server. >> "%ROOT_DIR%\launcher.log"
+echo Приложение закрыто. AI-сервер продолжает работать в отдельном окне. >> "%ROOT_DIR%\launcher.log"
+echo Для остановки сервера закройте окно "VN Studio AI Server". >> "%ROOT_DIR%\launcher.log"
 echo Готово. >> "%ROOT_DIR%\launcher.log"
 del "%ROOT_DIR%\health.tmp" 2>nul
