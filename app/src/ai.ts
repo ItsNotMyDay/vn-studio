@@ -46,8 +46,17 @@ export function loadAiSettings(): AiSettings {
     if (raw) {
       const saved = JSON.parse(raw);
       if (saved && typeof saved === 'object') {
+        let migrated = false;
         if (Object.prototype.hasOwnProperty.call(saved, 'serverToken')) {
           delete saved.serverToken;
+          migrated = true;
+        }
+        if (saved.openaiBaseUrl === 'https://api.openai.com/v1' && !saved.openaiApiKey && !saved.openaiModel) {
+          saved.openaiBaseUrl = AI_DEFAULT.openaiBaseUrl;
+          saved.openaiModel = AI_DEFAULT.openaiModel;
+          migrated = true;
+        }
+        if (migrated) {
           try { localStorage.setItem('vn-studio-ai', JSON.stringify(saved)); } catch {}
         }
         return { ...AI_DEFAULT, ...saved };
