@@ -1363,6 +1363,10 @@ function AiModelsPanel() {
       s.toast('Укажите адрес API');
       return;
     }
+    if (!apiKey.trim()) {
+      s.toast('Введите API-ключ провайдера');
+      return;
+    }
     setApiChecking(true);
     try {
       const normalized = normalizeOpenAiBase(apiBase);
