@@ -118,7 +118,15 @@ def get_hardware_report(storage_path: Optional[str] = None) -> dict[str, Any]:
     try:
         import torch
 
-        report["software"]["torch"] = {"available": True, "version": str(torch.__version__)}
+        report["software"]["torch"] = {
+            "available": True,
+            "version": str(torch.__version__),
+            "cuda_runtime": getattr(getattr(torch, "version", None), "cuda", None),
+        }
+        try:
+            report["software"]["torch"]["cudnn"] = torch.backends.cudnn.version()
+        except Exception:
+            report["software"]["torch"]["cudnn"] = None
         if torch.cuda.is_available():
             for index in range(torch.cuda.device_count()):
                 props = torch.cuda.get_device_properties(index)
@@ -170,6 +178,11 @@ def get_hardware_report(storage_path: Optional[str] = None) -> dict[str, Any]:
                     "total_vram_gb": None, "free_vram_gb": None, "bf16": False,
                 })
     except Exception as exc:
+        report["software"]["torch"] = {
+            "available": False,
+            "version": None,
+            "error": f"{type(exc).__name__}: {str(exc)[:240]}",
+        }
         report["torch_error"] = f"{type(exc).__name__}: {str(exc)[:240]}"
 
     check_path = storage_path or os.path.dirname(__file__)
