@@ -17,6 +17,9 @@ def fake_hardware(ram_gb=64):
             "diffusers": {"available": True, "version": "test"},
             "accelerate": {"available": True, "version": "test"},
             "bitsandbytes": {"available": False, "version": None},
+            "gptqmodel": {"available": True, "version": "test"},
+            "auto_gptq": {"available": False, "version": None},
+            "autoawq": {"available": False, "version": None},
         },
         "storage": {"free_gb": 100},
     }
