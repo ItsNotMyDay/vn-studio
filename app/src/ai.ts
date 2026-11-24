@@ -414,7 +414,7 @@ export interface LlmSuggestion {
   tone?: string;
 }
 
-export async function llmHealth(endpoint: string): Promise<{ loaded: boolean; path?: string | null; device?: string | null; error?: string | null }> {
+export async function llmHealth(endpoint: string): Promise<{ loaded: boolean; path?: string | null; device?: string | null; quantization?: string | null; error?: string | null }> {
   try {
     return await jsonFetch(`${endpoint.replace(/\/+$/, '')}/llm/health`, undefined, 4000);
   } catch {
