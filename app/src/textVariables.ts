@@ -2,7 +2,7 @@ import type { Character, Variable } from './store';
 
 export function characterVariableAlias(character: Pick<Character, 'id' | 'name' | 'isNarrator'>): string {
   if (character.isNarrator || character.id === 'global') return 'GLOBAL';
-  return character.name.trim().toLocaleUpperCase().replace(/[^\\p{L}\\p{N}_-]+/gu, '_').replace(/^_+|_+$/g, '');
+  return character.name.trim().toLocaleUpperCase().replace(/[^\p{L}\p{N}_-]+/gu, '_').replace(/^_+|_+$/g, '');
 }
 
 export function resolveVariableText(
@@ -13,7 +13,7 @@ export function resolveVariableText(
   const byAlias = new Map<string, Character>();
   characters.forEach(character => byAlias.set(characterVariableAlias(character), character));
   return String(source ?? '').replace(
-    /@([\\p{L}\\p{N}_-]+)\\.([\\p{L}\\p{N}_-]+)/gu,
+    /@([\p{L}\p{N}_-]+)\.([\p{L}\p{N}_-]+)/gu,
     (token, alias: string, key: string) => {
       const character = byAlias.get(alias.toLocaleUpperCase());
       if (!character) return token;
@@ -37,7 +37,7 @@ export function getVariableAutocomplete(
   characters: Character[],
 ): VariableAutocomplete {
   const prefix = value.slice(0, cursor);
-  const match = /@([^@\\s]*)$/u.exec(prefix);
+  const match = /@([^@\s]*)$/u.exec(prefix);
   if (!match) return null;
   const token = match[1];
   const start = cursor - match[0].length;
