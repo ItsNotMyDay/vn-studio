@@ -109,7 +109,7 @@ export function LlmChat() {
     refresh();
     const iv = aiCfg.llmProvider === 'openai' ? null : setInterval(refresh, 8000);
     return () => { alive.current = false; if (iv) clearInterval(iv); abortRef.current?.abort(); if (jobRef.current) aiCancelJob(endpoint, jobRef.current); };
-  }, [endpoint, aiCfg.llmProvider, aiCfg.llmPath, aiCfg.openaiBaseUrl, aiCfg.openaiApiKey, aiCfg.openaiModel, aiCfg.serverToken]);
+  }, [endpoint, aiCfg.llmProvider, aiCfg.llmPath, aiCfg.openaiBaseUrl, aiCfg.openaiApiKey, aiCfg.openaiModel]);
   useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [messages, pendingPlan, lastLog]);
 
   const push = (content: string) => setMessages(m => [...m, { role: 'assistant', content }]);
@@ -372,7 +372,7 @@ export function LlmChat() {
 
       {!status.online && (
         <div className="px-3 py-2 border-t border-ink-700 space-y-1.5 text-left">
-          <div className="text-[11px] text-danger leading-snug text-left">{aiCfg.llmProvider === 'openai' ? 'OpenAI API недоступен через AI-сервер ' + endpoint + '. Проверь адрес, API key и токен доступа.' : 'Сервер генерации не отвечает по адресу ' + endpoint + '. Запустите ai-server/server.py.'}</div>
+          <div className="text-[11px] text-danger leading-snug text-left">{aiCfg.llmProvider === 'openai' ? 'OpenAI API недоступен через AI-сервер ' + endpoint + '. Проверь адрес API и ключ провайдера.' : 'Сервер генерации не отвечает по адресу ' + endpoint + '. Запустите ai-server/server.py.'}</div>
           <button className="btn w-full justify-center" onClick={refresh}><RefreshCw size={13} /> Повторить</button>
         </div>
       )}
