@@ -228,6 +228,8 @@ export interface AiHealth {
   device?: string;
   model_loaded?: boolean;
   model_id?: string;
+  path?: string | null;
+  quant?: string | null;
   busy?: boolean;
   error?: string;
 }
@@ -235,7 +237,7 @@ export interface AiHealth {
 export async function aiHealth(endpoint: string): Promise<AiHealth> {
   try {
     const j = await jsonFetch(`${endpoint.replace(/\/+$/, '')}/health`, undefined, 4000);
-    return { ok: !!j.ok, device: j.device, model_loaded: j.model_loaded, model_id: j.model_id, busy: j.busy };
+    return { ok: !!j.ok, device: j.device, model_loaded: j.model_loaded, model_id: j.model_id, path: j.path, quant: j.quant, busy: j.busy };
   } catch (e: any) {
     return { ok: false, error: e?.message ?? 'нет соединения' };
   }
