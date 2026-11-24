@@ -21,7 +21,7 @@ import { QuantizationDialog } from './QuantizationDialog';
 import {
   loadAiSettings, saveAiSettings, aiHealth, llmHealth, embeddingsHealth, aiListModels,
   aiLoadJob, llmLoadJob, aiUnloadModel, llmUnload, aiCancelJob,
-  aiDownloadHfModel, openAiListModels, normalizeOpenAiBase,
+  aiDownloadHfModel, openAiListModels, openAiTestConnection, normalizeOpenAiBase,
   aiSystemDiagnostics, aiModelCompatibility,
   type AiSettings, type ModelCompatibilityReport, type LocalQuantizationMode,
 } from './ai';
@@ -1312,13 +1312,19 @@ function AiModelsPanel() {
 
   useEffect(() => {
     if (cfg.llmProvider !== 'openai') { setRemoteOk(null); return; }
+    // Yandex's model-list API is a separate metadata operation. A 403 there
+    // must not mark text generation as unavailable; the explicit test button
+    // sends a real low-token chat request instead.
+    if (cfg.openaiBaseUrl.includes('ai.api.cloud.yandex.net')) {
+      setRemoteOk(!!cfg.openaiApiKey && !!cfg.openaiProject && !!cfg.openaiModel);
+      return;
+    }
     let alive = true;
     const tick = async () => {
       try {
         const models = await openAiListModels(ep, { baseUrl: cfg.openaiBaseUrl, apiKey: cfg.openaiApiKey, projectId: cfg.openaiProject });
         const ids = (models.data ?? []).map(item => item.id);
-        const isYandex = cfg.openaiBaseUrl.includes('ai.api.cloud.yandex.net');
-        const valid = !cfg.openaiModel || !ids.length || ids.includes(cfg.openaiModel) || isYandex;
+        const valid = !cfg.openaiModel || !ids.length || ids.includes(cfg.openaiModel);
         if (alive) setRemoteOk(valid);
       } catch {
         if (alive) setRemoteOk(false);
@@ -1421,12 +1427,22 @@ function AiModelsPanel() {
         }
         if (selected && !modelUri) selected = 'gpt://' + projectId + '/' + selected.replace(/^\/+/, '');
       }
-      const models = await openAiListModels(ep, { baseUrl: normalized, apiKey: apiKey.trim(), projectId });
-      const ids = (models.data ?? []).map(item => item.id).filter(Boolean);
-      if (!selected) selected = ids[0] || '';
-      if (!selected) throw new Error('Сервер ответил, но не вернул список моделей. Введите ID модели вручную.');
-      if (ids.length && !ids.includes(selected) && !isYandex) {
-        throw new Error('Модель ' + selected + ' не найдена в /models. Проверьте её ID.');
+      if (!selected) {
+        if (isYandex) throw new Error('Укажите ID модели Yandex AI Studio.');
+        const models = await openAiListModels(ep, { baseUrl: normalized, apiKey: apiKey.trim(), projectId });
+        selected = (models.data ?? [])[0]?.id || '';
+      }
+      if (!selected) throw new Error('Не удалось определить модель. Введите её ID вручную.');
+      if (isYandex) {
+        await openAiTestConnection(ep, {
+          baseUrl: normalized, apiKey: apiKey.trim(), projectId, model: selected,
+        });
+      } else {
+        const models = await openAiListModels(ep, { baseUrl: normalized, apiKey: apiKey.trim(), projectId });
+        const ids = (models.data ?? []).map(item => item.id).filter(Boolean);
+        if (ids.length && !ids.includes(selected)) {
+          throw new Error('Модель ' + selected + ' не найдена в /models. Проверьте её ID.');
+        }
       }
       patch({
         llmProvider: 'openai',
@@ -1449,12 +1465,21 @@ function AiModelsPanel() {
   const checkOpenAi = async () => {
     setApiChecking(true);
     try {
-      const models = await openAiListModels(ep, { baseUrl: cfg.openaiBaseUrl, apiKey: cfg.openaiApiKey, projectId: cfg.openaiProject });
-      setRemoteOk(true);
-      s.toast('Соединение с API установлено. Моделей: ' + (models.data?.length ?? 0));
+      if (cfg.openaiBaseUrl.includes('ai.api.cloud.yandex.net')) {
+        await openAiTestConnection(ep, {
+          baseUrl: cfg.openaiBaseUrl, apiKey: cfg.openaiApiKey,
+          projectId: cfg.openaiProject, model: cfg.openaiModel,
+        });
+        setRemoteOk(true);
+        s.toast('Yandex AI Studio: тестовая генерация прошла успешно');
+      } else {
+        const models = await openAiListModels(ep, { baseUrl: cfg.openaiBaseUrl, apiKey: cfg.openaiApiKey, projectId: cfg.openaiProject });
+        setRemoteOk(true);
+        s.toast('Соединение с API установлено. Моделей: ' + (models.data?.length ?? 0));
+      }
     } catch (error: any) {
       setRemoteOk(false);
-      s.toast('OpenAI API недоступен: ' + (error?.message ?? error));
+      s.toast('Ошибка проверки API: ' + (error?.message ?? error));
     } finally {
       setApiChecking(false);
     }
