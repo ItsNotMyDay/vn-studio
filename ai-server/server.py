@@ -354,7 +354,7 @@ def load_component(path, name, index, dtype, quant_config=None):
         from transformers import AutoProcessor
         return AutoProcessor.from_pretrained(folder)
     lib, cls_name = (index.get(name) or [None, None])[:2]
-    kw = {"dtype": dtype}
+    kw = {"dtype": dtype if dtype is not None else "auto"}
     if quant_config is not None:
         kw["quantization_config"] = quant_config
     if lib == "transformers" or name in ("text_encoder",):
@@ -451,9 +451,8 @@ def load_model(model_id: str, raw_path: str, job: dict, quantization_mode: str =
             torch.backends.cudnn.allow_tf32 = True
         except Exception:
             pass
-    # "none" keeps the precision stored in the checkpoint; FP16 and INT4
-    # use explicit half-precision compute on supported accelerator paths.
-    dtype = torch.float16 if quantization_mode in ("int4", "fp16") else None
+    # Preserve checkpoint precision in "none" mode; explicitly convert to FP16 otherwise.
+    dtype = torch.float16 if quantization_mode in ("int4", "fp16") else "auto"
     index = read_index(path)
     pipe_cls = DiffusionPipeline
     cls_name = str(index.get("_class_name", ""))
@@ -505,7 +504,9 @@ def load_model(model_id: str, raw_path: str, job: dict, quantization_mode: str =
                     job["warnings"].append("Текстовый энкодер оставлен в исходной точности: " + str(exc)[:180])
             job["progress"] = 0.7
             job["stage"] = "Сборка INT4 pipeline"
-            pipe = _fp(pipe_cls, path, dtype=torch.float16, **kw)
+            if not compatibility.get("hardware", {}).get("software", {}).get("accelerate", {}).get("available"):
+                raise RuntimeError("Для INT4-квантования Diffusers требуется пакет accelerate.")
+            pipe = _fp(pipe_cls, path, dtype=torch.float16, device_map="auto", **kw)
             quant = "int4-nf4"
         except Exception as exc:
             raise RuntimeError(
@@ -523,7 +524,10 @@ def load_model(model_id: str, raw_path: str, job: dict, quantization_mode: str =
         pipe = _fp(pipe_cls, path, **explicit)
         quant = "none"
     job["progress"] = 0.88
-    if device == "cuda":
+    if device == "cuda" and quant == "int4-nf4":
+        # The pipeline was placed by Accelerate's device_map during from_pretrained.
+        strategy = "auto_device_map"
+    elif device == "cuda":
         model_weight_bytes = int(((compatibility.get("model") or {}).get("weight_bytes") or 0))
         estimated_memory_pressure = (
             not profile_is_reliable
@@ -753,14 +757,20 @@ def load_llm(path: str, quantization_mode: str = "none"):
         strategy = "cuda_int4_nf4"
 
     use_prequantized = bool(model_info.get("quantized"))
-    if quantization_mode == "int4" and use_prequantized:
+    quant_method = str(model_info.get("quant_method") or "native")
+    if use_prequantized:
+        if quantization_mode != "int4":
+            raise RuntimeError(
+                f"Эта модель уже сохранена в квантованном формате ({quant_method}). "
+                "Выбрать FP16 или отключить квантование без скачивания не квантованной версии нельзя."
+            )
         # A GPTQ/AWQ/BitsAndBytes checkpoint already carries its own quantization.
         # Do not attempt to quantize it a second time.
-        applied_quantization = "pre-quantized"
+        applied_quantization = f"pre-quantized-{quant_method}"
     else:
         applied_quantization = quantization_mode
 
-    dtype = torch.float16 if quantization_mode in ("int4", "fp16") else None
+    dtype = torch.float16 if quantization_mode in ("int4", "fp16") else "auto"
     compute_dtype = torch.float16
     if quantization_mode == "int4":
         try:
@@ -772,9 +782,10 @@ def load_llm(path: str, quantization_mode: str = "none"):
     accelerate_available = bool(
         compatibility.get("hardware", {}).get("software", {}).get("accelerate", {}).get("available")
     )
-    kwargs = {"low_cpu_mem_usage": accelerate_available}
-    if dtype is not None:
-        kwargs["torch_dtype"] = dtype
+    kwargs = {
+        "low_cpu_mem_usage": accelerate_available,
+        "dtype": dtype,
+    }
 
     if device == "cuda":
         if not accelerate_available:
@@ -808,7 +819,7 @@ def load_llm(path: str, quantization_mode: str = "none"):
 
     profile.update(
         device=device,
-        dtype="float16" if dtype is not None else "native",
+        dtype="float16" if quantization_mode in ("int4", "fp16") else "auto",
         quantization=applied_quantization,
     )
 
@@ -816,8 +827,8 @@ def load_llm(path: str, quantization_mode: str = "none"):
         try:
             model = model_cls.from_pretrained(path, **kwargs)
         except TypeError:
-            if "torch_dtype" in kwargs:
-                kwargs["dtype"] = kwargs.pop("torch_dtype")
+            if "dtype" in kwargs:
+                kwargs["torch_dtype"] = kwargs.pop("dtype")
             model = model_cls.from_pretrained(path, **kwargs)
         if device in ("cpu", "cuda", "mps", "xpu") and "device_map" not in kwargs:
             model = model.to(device)
@@ -1199,8 +1210,9 @@ def llm_load(req: Optional[LoadReq] = None):
     compatibility = build_compatibility_report(path, "llm")
     with LLM_LOCK:
         current_quantization = (LLM_STATE.get("profile") or {}).get("quantization", "none")
-        if (LLM_STATE["loaded"] and LLM_STATE["path"] == path
-                and current_quantization in (request.quantization, "pre-quantized") and request.quantization == "none"):
+        same_requested_mode = current_quantization == request.quantization
+        native_int4_checkpoint = current_quantization.startswith("pre-quantized-") and request.quantization == "int4"
+        if LLM_STATE["loaded"] and LLM_STATE["path"] == path and (same_requested_mode or native_int4_checkpoint):
             return {"job_id": None, "ok": True, "message": "already loaded", "device": LLM_STATE["device"]}
         if LLM_STATE["loaded"]:
             LLM_STATE.update(loaded=False, model=None, tokenizer=None, processor=None,
