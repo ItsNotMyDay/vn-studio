@@ -452,7 +452,11 @@ def build_compatibility_report(
         # Do not misclassify a model as unsupported just because the older Auto class is missing.
         try:
             import transformers
-            supports_mm = hasattr(transformers, "AutoModelForMultimodalLM") or hasattr(transformers, "AutoModelForImageTextToText")
+            supports_mm = (
+                hasattr(transformers, "AutoModelForMultimodalLM")
+                or hasattr(transformers, "AutoModelForImageTextToText")
+                or hasattr(transformers, "AutoModelForVision2Seq")
+            )
         except Exception:
             supports_mm = False
         if not supports_mm:
