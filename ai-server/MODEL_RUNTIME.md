@@ -24,7 +24,7 @@ step; the first real generation can still expose model-specific requirements.
 | --- | --- | --- |
 | Transformers causal language models | `AutoModelForCausalLM` | Implemented |
 | Transformers encoder-decoder language models | `AutoModelForSeq2SeqLM` | Implemented |
-| Transformers multimodal models | `AutoModelForMultimodalLM` or `AutoModelForImageTextToText` plus `AutoProcessor` | Text-only chat path implemented; media inputs need UI/runtime work |
+| Transformers multimodal models | `AutoModelForMultimodalLM`, `AutoModelForImageTextToText`, or `AutoModelForVision2Seq` plus `AutoProcessor` | Text-only chat path implemented; media inputs need UI/runtime work |
 | Diffusers image pipelines | `DiffusionPipeline` / pipeline class in `model_index.json` | Implemented |
 | GGUF / GGML | llama.cpp | Detected; backend not yet connected |
 | ONNX-only model packages | ONNX Runtime | Detected; model execution adapter not yet connected |
@@ -37,7 +37,7 @@ step; the first real generation can still expose model-specific requirements.
   Body: `{"model_kind":"llm","model_path":"C:/models/model"}`.
 - `POST /llm/load` and `POST /model/load` — repeat compatibility preflight server-side before enqueuing the load.
 
-The client UI shows the diagnostics in Settings → AI models and checks
+Models without a configured chat template use a plain role-labelled text fallback; encoder-decoder output tokens are decoded without incorrectly stripping the encoder prompt.\n\nThe client UI shows the diagnostics in Settings → AI models and checks
 compatibility before starting a local model load.
 
 ## Safety and scope
