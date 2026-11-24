@@ -417,6 +417,10 @@ def load_model(model_id: str, raw_path: str, job: dict):
         raise RuntimeError("Проверка совместимости не пройдена: " + detail)
 
     device, vram, gpu_name = cuda_info()
+    planned_device = (compatibility.get("profile") or {}).get("device")
+    if planned_device == "cpu" and device != "cpu":
+        gpu_name = f"CPU fallback (GPU detected: {gpu_name})"
+        device, vram = "cpu", 0.0
     if device == "cuda":
         torch.cuda.set_device(0)
         try:
@@ -718,8 +722,6 @@ def load_llm(path: str):
             max_memory = _llm_max_memory(compatibility)
             if max_memory:
                 kwargs["max_memory"] = max_memory
-        else:
-            kwargs["device_map"] = "cuda"
     elif device in ("mps", "xpu"):
         if kwargs["low_cpu_mem_usage"]:
             kwargs["device_map"] = "auto"
@@ -749,7 +751,7 @@ def load_llm(path: str):
             if "torch_dtype" in kwargs:
                 kwargs["dtype"] = kwargs.pop("torch_dtype")
             model = model_cls.from_pretrained(path, **kwargs)
-        if device in ("cpu", "mps", "xpu") and "device_map" not in kwargs:
+        if device in ("cpu", "cuda", "mps", "xpu") and "device_map" not in kwargs:
             model = model.to(device)
         model.eval()
         with LOCK:
