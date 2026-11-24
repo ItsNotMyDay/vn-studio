@@ -1033,7 +1033,7 @@ export function Inspector() {
                           style={(d.spriteType ?? 'asset') === type ? { borderColor: '#2ee6a8', color: '#2ee6a8' } : {}}
                           onClick={() => s.updateNodeData(node.id, {
                             spriteType: type,
-                            entityId: type === 'asset' ? d.entityId : (d.entityId || node.id),
+                            entityId: type === 'asset' ? undefined : (d.entityId || node.id),
                             opacity: d.opacity ?? 100,
                           })}>
                           {type === 'text' ? 'Текст' : type === 'geometry' ? 'Геометрия' : 'Спрайт'}
