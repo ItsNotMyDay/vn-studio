@@ -507,11 +507,8 @@ def load_model(model_id: str, raw_path: str, job: dict, quantization_mode: str =
             job["stage"] = "Сборка INT4 pipeline"
             if not compatibility.get("hardware", {}).get("software", {}).get("accelerate", {}).get("available"):
                 raise RuntimeError("Для INT4-квантования Diffusers требуется пакет accelerate.")
-            # Diffusers BitsAndBytes accepts explicit placement strategies (cuda/balanced/cpu), not Transformers-style "auto".
-            # This app currently targets a single selected CUDA device for INT4 loading.
-            # Do not force the whole pipeline onto CUDA here. The VRAM-aware placement
+            # Assemble without a forced device_map. The VRAM-aware placement
             # below decides between full-GPU execution and model CPU offload.
-            # This also avoids unsupported device_map="auto" in older Diffusers builds.
             pipe = _fp(pipe_cls, path, dtype=torch.float16, **kw)
             quant = "int4-nf4"
         except Exception as exc:
