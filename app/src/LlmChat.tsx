@@ -84,17 +84,28 @@ export function LlmChat() {
   const refresh = async () => {
     try {
       if (aiCfg.llmProvider === 'openai') {
-        const result = await openAiListModels(endpoint, { baseUrl: aiCfg.openaiBaseUrl, apiKey: aiCfg.openaiApiKey, projectId: aiCfg.openaiProject });
-        const ids = (result.data ?? []).map(item => item.id);
         const isYandex = aiCfg.openaiBaseUrl.includes('ai.api.cloud.yandex.net');
-        const connected = !!aiCfg.openaiModel && (!ids.length || ids.includes(aiCfg.openaiModel) || isYandex);
-        if (alive.current) setStatus({
-          online: true,
-          loaded: connected,
-          path: aiCfg.openaiModel,
-          device: 'OpenAI API',
-          error: connected ? undefined : 'Модель не найдена в ответе /models',
-        });
+        if (isYandex) {
+          const configured = !!aiCfg.openaiApiKey && !!aiCfg.openaiProject && !!aiCfg.openaiModel;
+          if (alive.current) setStatus({
+            online: configured,
+            loaded: configured,
+            path: aiCfg.openaiModel,
+            device: 'Yandex AI Studio',
+            error: configured ? undefined : 'Не заполнены API key, Folder ID или model URI',
+          });
+        } else {
+          const result = await openAiListModels(endpoint, { baseUrl: aiCfg.openaiBaseUrl, apiKey: aiCfg.openaiApiKey, projectId: aiCfg.openaiProject });
+          const ids = (result.data ?? []).map(item => item.id);
+          const connected = !!aiCfg.openaiModel && (!ids.length || ids.includes(aiCfg.openaiModel));
+          if (alive.current) setStatus({
+            online: true,
+            loaded: connected,
+            path: aiCfg.openaiModel,
+            device: 'OpenAI API',
+            error: connected ? undefined : 'Модель не найдена в ответе /models',
+          });
+        }
       } else {
         const [server, h] = await Promise.all([aiHealth(endpoint), llmHealth(endpoint)]);
         if (alive.current) setStatus({ online: !!server.ok, loaded: !!h.loaded, path: h.path, device: h.device, quantization: h.quantization, error: server.ok ? h.error : server.error });
