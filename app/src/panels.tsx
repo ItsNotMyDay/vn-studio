@@ -1444,11 +1444,8 @@ function AiModelsPanel() {
 
   const loadImg = async () => {
     const report = await checkCompatibility('image', false);
-    if (!report?.can_load) {
-      if (report) setCompatibilityOpen(true);
-      return;
-    }
-    setProg(p => ({ ...p, img: { on: true, p: 0, stage: 'Подготовка профиля запуска…' } }));
+    const warning = report?.warnings?.[0] || (!report?.can_load ? report?.reasons?.[0] : '');
+    setProg(p => ({ ...p, img: { on: true, p: 0, stage: warning ? '⚠️ ' + warning + ' · попытка загрузки' : 'Подготовка профиля запуска…' } }));
     try {
       await aiLoadJob(ep, cfg.modelId, cfg.modelPath, (pr, st) => setProg(p => ({ ...p, img: { on: true, p: pr, stage: st } })));
       s.toast('Модель генерации загружена');
@@ -1458,11 +1455,8 @@ function AiModelsPanel() {
 
   const loadLlm = async () => {
     const report = await checkCompatibility('llm', false);
-    if (!report?.can_load) {
-      if (report) setCompatibilityOpen(true);
-      return;
-    }
-    setProg(p => ({ ...p, llm: { on: true, p: 0, stage: 'Подготовка профиля запуска…' } }));
+    const warning = report?.warnings?.[0] || (!report?.can_load ? report?.reasons?.[0] : '');
+    setProg(p => ({ ...p, llm: { on: true, p: 0, stage: warning ? '⚠️ ' + warning + ' · попытка загрузки' : 'Подготовка профиля запуска…' } }));
     try {
       const r = await llmLoadJob(ep, cfg.llmPath || null, (pr, st) => setProg(p => ({ ...p, llm: { on: true, p: pr, stage: st } })));
       if (r.ok) s.toast(`LLM загружена (${r.device})`);
