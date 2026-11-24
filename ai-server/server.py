@@ -1354,9 +1354,11 @@ def _openai_request(base_url: str, api_key: str, path: str, payload: Optional[di
 
 @app.get("/llm/health")
 def llm_health():
-    with LOCK:
+    with LLM_LOCK:
+        profile = LLM_STATE.get("profile") or {}
         return {"loaded": LLM_STATE["loaded"], "path": LLM_STATE["path"],
-                "device": LLM_STATE["device"], "error": LLM_STATE["error"]}
+                "device": LLM_STATE["device"], "quantization": profile.get("quantization"),
+                "error": LLM_STATE["error"]}
 
 @app.post("/openai/models")
 def openai_models(req: OpenAiConnectionReq):
