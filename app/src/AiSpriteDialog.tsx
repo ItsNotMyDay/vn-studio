@@ -20,7 +20,7 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
   const [progress, setProgress] = useState(0);
   const [stage, setStage] = useState('');
   const [message, setMessage] = useState('');
-  const [health, setHealth] = useState<{ ok: boolean; device?: string; model_loaded?: boolean; error?: string }>({ ok: false });
+  const [health, setHealth] = useState<{ ok: boolean; device?: string; model_loaded?: boolean; model_id?: string; path?: string | null; error?: string }>({ ok: false });
   const [result, setResult] = useState<{ url: string; blob: Blob; source: 'ai' | 'procedural'; seed: number } | null>(null);
   const [usedSeed, setUsedSeed] = useState<number>(0);
   const [quantizationOpen, setQuantizationOpen] = useState(false);
@@ -105,6 +105,9 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
 
   const generate = async (seed?: number, quantization?: LocalQuantizationMode) => {
     if (!c) return;
+    // React click handlers receive a MouseEvent. Never let that event become
+    // the seed passed to JSON.stringify in the generation request.
+    const requestedSeed = typeof seed === 'number' && Number.isFinite(seed) ? seed : undefined;
     setResult(null); setMessage(''); setProgress(0);
     try {
       setPhase('checking'); setStage('Проверка сервера…');
@@ -112,10 +115,15 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
       if (!aliveRef.current) return;
       setHealth(h);
       if (!h.ok) throw new Error(`Локальный сервер не запущен (${cfg.endpoint}). Поднимите ai-server/server.py или нажмите «Локальный рендер».`);
-      if (!h.model_loaded) {
-        if (!cfg.autoLoad) throw new Error('Автозагрузка отключена. Сначала загрузите модель вручную.');
+      const loadedPath = (h.path || '').replace(/\\\\/g, '/').toLowerCase();
+      const selectedPath = (cfg.modelPath || '').replace(/\\\\/g, '/').toLowerCase();
+      const sameModel = !!h.model_loaded
+        && (!h.model_id || h.model_id === cfg.modelId)
+        && (!selectedPath || !loadedPath || loadedPath === selectedPath);
+      if (!sameModel) {
+        if (!cfg.autoLoad) throw new Error('Автозагрузка отключена. Сначала загрузите выбранную модель вручную.');
         if (!quantization) {
-          setPendingLoadAction({ kind: 'generate', seed });
+          setPendingLoadAction({ kind: 'generate', seed: requestedSeed });
           setQuantizationOpen(true);
           setPhase('idle'); setStage(''); setMessage('Выберите режим загрузки локальной модели');
           return;
@@ -123,9 +131,10 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
         if (!await loadLocalModel(quantization)) return;
       }
       setPhase('generating'); setStage('Генерация спрайта…');
-      const useSeed = seed ?? (cfg.seed < 0 ? Math.floor(Math.random() * 2 ** 31) : cfg.seed);
+      const useSeed = requestedSeed ?? (cfg.seed < 0 ? Math.floor(Math.random() * 2 ** 31) : cfg.seed);
       const final = await runJob('/generate', {
         model_id: cfg.modelId,
+        model_path: cfg.modelPath,
         prompt,
         negative_prompt: cfg.negative,
         width: cfg.width,
@@ -230,7 +239,7 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
               <button className="btn justify-center" disabled={busy} onClick={() => { patch({ seed: (usedSeed || Math.floor(Math.random() * 1e9)) + 1 }); generate(); }}>
                 <Dice5 size={14} /> Ещё вариант
               </button>
-              <button className="btn justify-center" disabled={busy} onClick={generate}><Wand2 size={14} /> Сгенерировать</button>
+              <button className="btn justify-center" disabled={busy} onClick={() => generate()}><Wand2 size={14} /> Сгенерировать</button>
               <button className="btn justify-center" disabled={busy} onClick={generateLocal}><Download size={14} /> Локальный рендер</button>
             </div>
 
