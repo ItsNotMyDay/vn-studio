@@ -3,7 +3,8 @@ import {
   Play, Square, Undo2, Redo2, Save, Download, FileText, Volume2, VolumeX, Plus, Trash2,
   Search, GripVertical, Clapperboard, AlertTriangle, PanelLeft, PanelRight, RotateCcw, Shuffle,
   MessageSquare, GitBranch, Sigma, Image, Music, StopCircle, X, Settings, Upload, Sparkles,
-  RefreshCw, Loader2, Server, Database, Eye, UserRound, Package, FolderOpen, KeyRound
+  RefreshCw, Loader2, Server, Database, Eye, UserRound, Package, FolderOpen, KeyRound,
+  Cpu, ScanSearch, CheckCircle2, XCircle
 } from 'lucide-react';
 import type { Node } from '@xyflow/react';
 import {
@@ -19,7 +20,9 @@ import { AiBackgroundDialog } from './AiBackgroundDialog';
 import {
   loadAiSettings, saveAiSettings, aiHealth, llmHealth, embeddingsHealth, aiListModels,
   aiLoadJob, llmLoadJob, aiUnloadModel, llmUnload, aiCancelJob,
-  aiDownloadHfModel, openAiListModels, normalizeOpenAiBase, type AiSettings,
+  aiDownloadHfModel, openAiListModels, normalizeOpenAiBase,
+  aiSystemDiagnostics, aiModelCompatibility,
+  type AiSettings, type ModelCompatibilityReport,
 } from './ai';
 
 const KIND_ICONS: Record<string, any> = {
@@ -1281,6 +1284,10 @@ function AiModelsPanel() {
   const [apiModel, setApiModel] = useState(cfg.openaiModel);
   const [apiChecking, setApiChecking] = useState(false);
   const [remoteOk, setRemoteOk] = useState<boolean | null>(null);
+  const [hardwareInfo, setHardwareInfo] = useState<any>(null);
+  const [compatibilityReport, setCompatibilityReport] = useState<ModelCompatibilityReport | null>(null);
+  const [compatibilityOpen, setCompatibilityOpen] = useState(false);
+  const [compatibilityLoading, setCompatibilityLoading] = useState(false);
   const ep = (s.director.aiEndpoint || 'http://127.0.0.1:8765').replace(/\/+$/, '');
 
   useEffect(() => {
@@ -1293,6 +1300,9 @@ function AiModelsPanel() {
       } catch {}
     };
     tick();
+    aiSystemDiagnostics(ep).then(info => {
+      if (alive) setHardwareInfo(info);
+    }).catch(() => {});
     const iv = setInterval(tick, 3000);
     return () => { alive = false; clearInterval(iv); };
   }, [ep]);
@@ -1315,6 +1325,23 @@ function AiModelsPanel() {
   }, [ep, cfg.llmProvider, cfg.openaiBaseUrl, cfg.openaiApiKey, cfg.openaiModel]);
 
   const patch = (p: Partial<AiSettings>) => setCfg(saveAiSettings(p));
+
+  const checkCompatibility = async (kind: 'llm' | 'image', open = true) => {
+    setCompatibilityLoading(true);
+    try {
+      const path = kind === 'image' ? cfg.modelPath : cfg.llmPath;
+      const modelId = kind === 'image' ? cfg.modelId : undefined;
+      const report = await aiModelCompatibility(ep, kind, path || null, modelId);
+      setCompatibilityReport(report);
+      if (open) setCompatibilityOpen(true);
+      return report;
+    } catch (error: any) {
+      s.toast('Не удалось проверить совместимость: ' + (error?.message ?? error));
+      return null;
+    } finally {
+      setCompatibilityLoading(false);
+    }
+  };
 
   const openAddModel = (kind: 'llm' | 'image') => {
     setHfUrl('');
@@ -1350,7 +1377,10 @@ function AiModelsPanel() {
       else patch({ modelPath: model.path, modelId: model.id });
       setList(await aiListModels(ep));
       setAddMode(null);
-      s.toast(hfKind === 'llm' ? 'Языковая модель скачана и добавлена в список' : 'Модель генерации изображений скачана и добавлена в список');
+      const report = await aiModelCompatibility(ep, hfKind, model.path, model.id);
+      setCompatibilityReport(report);
+      setCompatibilityOpen(true);
+      s.toast(hfKind === 'llm' ? 'Языковая модель скачана. Проверка совместимости готова.' : 'Модель генерации скачана. Проверка совместимости готова.');
     } catch (error: any) {
       s.toast('Ошибка скачивания: ' + (error instanceof Error ? error.message : String(error)));
     } finally {
@@ -1409,7 +1439,12 @@ function AiModelsPanel() {
   };
 
   const loadImg = async () => {
-    setProg(p => ({ ...p, img: { on: true, p: 0, stage: 'Старт…' } }));
+    const report = await checkCompatibility('image', false);
+    if (!report?.can_load) {
+      if (report) setCompatibilityOpen(true);
+      return;
+    }
+    setProg(p => ({ ...p, img: { on: true, p: 0, stage: 'Подготовка профиля запуска…' } }));
     try {
       await aiLoadJob(ep, cfg.modelId, cfg.modelPath, (pr, st) => setProg(p => ({ ...p, img: { on: true, p: pr, stage: st } })));
       s.toast('Модель генерации загружена');
@@ -1418,7 +1453,12 @@ function AiModelsPanel() {
   };
 
   const loadLlm = async () => {
-    setProg(p => ({ ...p, llm: { on: true, p: 0, stage: 'Старт…' } }));
+    const report = await checkCompatibility('llm', false);
+    if (!report?.can_load) {
+      if (report) setCompatibilityOpen(true);
+      return;
+    }
+    setProg(p => ({ ...p, llm: { on: true, p: 0, stage: 'Подготовка профиля запуска…' } }));
     try {
       const r = await llmLoadJob(ep, cfg.llmPath || null, (pr, st) => setProg(p => ({ ...p, llm: { on: true, p: pr, stage: st } })));
       if (r.ok) s.toast(`LLM загружена (${r.device})`);
@@ -1435,6 +1475,19 @@ function AiModelsPanel() {
   return (
     <>
     <Group title="AI-модели">
+      {hardwareInfo && (
+        <div className="rounded-lg border border-ink-700 bg-ink-900/40 px-2.5 py-2 flex items-center gap-2 text-[10px]">
+          <Cpu size={14} className="text-mute shrink-0" />
+          <span className="min-w-0 flex-1 text-mute truncate">
+            {hardwareInfo.accelerators?.[0]?.name || hardwareInfo.cpu?.name || 'Ускоритель не обнаружен'}
+            {hardwareInfo.memory?.ram_total_gb ? ` · RAM ${hardwareInfo.memory.ram_total_gb} ГБ` : ''}
+            {hardwareInfo.accelerators?.[0]?.total_vram_gb ? ` · VRAM ${hardwareInfo.accelerators[0].total_vram_gb} ГБ` : ''}
+          </span>
+          <button className="btn !px-2 !py-1" onClick={() => { setCompatibilityReport(null); setCompatibilityOpen(true); }}>
+            Характеристики
+          </button>
+        </div>
+      )}
       <div className="space-y-2">
         <span className="block text-[10px] text-mute">Модель генерации изображений</span>
         <div className="flex gap-1.5">
@@ -1462,7 +1515,10 @@ function AiModelsPanel() {
         </div>
         {prog.img.on && <ProgressBar p={prog.img.p} stage={prog.img.stage} />}
         <div className="flex gap-1.5">
-          <button className="btn flex-1 justify-center" disabled={prog.img.on} onClick={loadImg}><Server size={12} /> Загрузить</button>
+          <button className="btn flex-1 justify-center" disabled={prog.img.on || compatibilityLoading} onClick={loadImg}><Server size={12} /> Загрузить</button>
+          <button className="btn justify-center" disabled={compatibilityLoading || prog.img.on} onClick={() => checkCompatibility('image', true)}>
+            {compatibilityLoading ? <Loader2 size={12} className="animate-spin" /> : <ScanSearch size={12} />} Проверить
+          </button>
           <button
             className="btn btn-danger flex-1 justify-center"
             disabled={!imgH?.model_loaded || prog.img.on}
@@ -1516,7 +1572,10 @@ function AiModelsPanel() {
             </div>
             {prog.llm.on && <ProgressBar p={prog.llm.p} stage={prog.llm.stage} />}
             <div className="flex gap-1.5">
-              <button className="btn flex-1 justify-center" disabled={prog.llm.on} onClick={loadLlm}><Server size={12} /> Загрузить</button>
+              <button className="btn flex-1 justify-center" disabled={prog.llm.on || compatibilityLoading} onClick={loadLlm}><Server size={12} /> Загрузить</button>
+              <button className="btn justify-center" disabled={compatibilityLoading || prog.llm.on} onClick={() => checkCompatibility('llm', true)}>
+                {compatibilityLoading ? <Loader2 size={12} className="animate-spin" /> : <ScanSearch size={12} />} Проверить
+              </button>
               <button
                 className="btn btn-danger flex-1 justify-center"
                 disabled={!llmH?.loaded || prog.llm.on}
@@ -1548,6 +1607,91 @@ function AiModelsPanel() {
         <span className="chip border-ink-600 text-mute">{embH?.indexes?.length ?? 0} глав в индексе</span>
       </div>
     </Group>
+
+
+    {compatibilityOpen && (
+      <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={() => setCompatibilityOpen(false)}>
+        <div className="panel border border-ink-600 rounded-2xl w-[min(620px,96vw)] max-h-[88vh] overflow-y-auto p-4 shadow-2xl space-y-3" onClick={e => e.stopPropagation()}>
+          <div className="flex items-center gap-2">
+            <ScanSearch size={16} style={{ color: 'var(--accent)' }} />
+            <span className="font-bold text-[13px]">Совместимость моделей и компьютера</span>
+            <div className="flex-1" />
+            <button className="btn !px-2" onClick={() => setCompatibilityOpen(false)}><X size={13} /></button>
+          </div>
+
+          {!compatibilityReport ? (
+            hardwareInfo ? (
+              <div className="space-y-2 text-[11px]">
+                <div className="font-semibold">Характеристики AI-сервера</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-lg bg-ink-900/50 p-2"><div className="text-mute">Процессор</div><div>{hardwareInfo.cpu?.name || 'Не определён'}</div></div>
+                  <div className="rounded-lg bg-ink-900/50 p-2"><div className="text-mute">Ядра CPU</div><div>{hardwareInfo.cpu?.logical_cores ?? '—'}</div></div>
+                  <div className="rounded-lg bg-ink-900/50 p-2"><div className="text-mute">RAM всего / свободно</div><div>{hardwareInfo.memory?.ram_total_gb ?? '—'} / {hardwareInfo.memory?.ram_available_gb ?? '—'} ГБ</div></div>
+                  <div className="rounded-lg bg-ink-900/50 p-2"><div className="text-mute">Свободно на диске моделей</div><div>{hardwareInfo.storage?.free_gb ?? '—'} ГБ</div></div>
+                </div>
+                <div className="font-semibold pt-1">Ускорители</div>
+                {hardwareInfo.accelerators?.length ? hardwareInfo.accelerators.map((gpu: any, index: number) => (
+                  <div key={index} className="rounded-lg bg-ink-900/50 p-2">
+                    <div className="font-medium">{gpu.name}</div>
+                    <div className="text-mute">{gpu.backend?.toUpperCase()} · VRAM {gpu.total_vram_gb ?? '—'} ГБ · свободно {gpu.free_vram_gb ?? '—'} ГБ</div>
+                  </div>
+                )) : <div className="text-mute">Совместимый GPU не обнаружен; доступен CPU-режим, если его хватит по памяти.</div>}
+                <div className="font-semibold pt-1">Библиотеки</div>
+                <div className="grid grid-cols-2 gap-1">
+                  {Object.entries(hardwareInfo.software || {}).map(([name, info]: [string, any]) => (
+                    <div key={name} className="flex items-center justify-between rounded bg-ink-900/40 px-2 py-1">
+                      <span>{name}</span><span className={info.available ? 'text-green-400' : 'text-red-400'}>{info.version || (info.available ? 'есть' : 'нет')}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : <div className="text-[11px] text-mute">Нет связи с AI-сервером или диагностика ещё не завершена.</div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between gap-2">
+                <div className="font-semibold text-[12px]">{compatibilityReport.model?.path ? modelNameOf(compatibilityReport.model.path) : 'Локальная модель'}</div>
+                <span className="chip" style={{
+                  borderColor: compatibilityReport.status === 'ready' ? '#9dff5766' : compatibilityReport.status === 'warning' ? '#f4c95d88' : '#ff547088',
+                  color: compatibilityReport.status === 'ready' ? '#9dff57' : compatibilityReport.status === 'warning' ? '#f4c95d' : '#ff5470',
+                }}>
+                  {compatibilityReport.status === 'ready' ? 'Совместима' :
+                    compatibilityReport.status === 'warning' ? 'Совместима с ограничениями' :
+                    compatibilityReport.status === 'unsupported' ? 'Не поддерживается' :
+                    compatibilityReport.status === 'blocked' ? 'Запуск невозможен' : 'Нет данных'}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-[10px]">
+                <div className="rounded-lg bg-ink-900/50 p-2"><div className="text-mute">Архитектура</div><div>{compatibilityReport.model?.architectures?.join(', ') || compatibilityReport.model?.model_type || '—'}</div></div>
+                <div className="rounded-lg bg-ink-900/50 p-2"><div className="text-mute">Адаптер</div><div>{compatibilityReport.model?.adapter || '—'}</div></div>
+                <div className="rounded-lg bg-ink-900/50 p-2"><div className="text-mute">Объём весов</div><div>{compatibilityReport.model?.weight_gb ?? '—'} ГБ</div></div>
+                <div className="rounded-lg bg-ink-900/50 p-2"><div className="text-mute">Формат</div><div>{compatibilityReport.model?.format || '—'}</div></div>
+              </div>
+              <div className="rounded-lg border border-ink-700 p-2 space-y-1 text-[10px]">
+                <div className="font-semibold">Выбранный профиль запуска</div>
+                <div>Устройство: {compatibilityReport.profile?.device || '—'} · Точность: {compatibilityReport.profile?.dtype || '—'}</div>
+                <div>Квантование: {compatibilityReport.profile?.quantization || '—'} · Размещение: {compatibilityReport.profile?.strategy || '—'}</div>
+                <div>Оценка VRAM: {compatibilityReport.profile?.estimated_vram_gb ?? '—'} ГБ · RAM: {compatibilityReport.profile?.estimated_ram_gb ?? '—'} ГБ</div>
+              </div>
+              {compatibilityReport.reasons?.length > 0 && <div className="space-y-1 text-[11px]">
+                <div className="font-semibold">Результат проверки</div>
+                {compatibilityReport.reasons.map((item, index) => <div key={index} className="flex gap-2"><CheckCircle2 size={13} className="text-mute shrink-0 mt-0.5" /><span>{item}</span></div>)}
+              </div>}
+              {compatibilityReport.warnings?.length > 0 && <div className="space-y-1 text-[11px]">
+                <div className="font-semibold text-amber-300">Предупреждения</div>
+                {compatibilityReport.warnings.map((item, index) => <div key={index} className="flex gap-2"><AlertTriangle size={13} className="text-amber-300 shrink-0 mt-0.5" /><span>{item}</span></div>)}
+              </div>}
+              <div className="text-[10px] text-mute">Это предварительная оценка. Фактическую совместимость подтверждает загрузка и короткая тестовая генерация.</div>
+            </>
+          )}
+          <div className="flex justify-end gap-2">
+            {compatibilityReport && <button className="btn" onClick={() => checkCompatibility(compatibilityReport.kind, true)} disabled={compatibilityLoading}>
+              {compatibilityLoading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} Повторить проверку
+            </button>}
+            <button className="btn" onClick={() => setCompatibilityOpen(false)}>Закрыть</button>
+          </div>
+        </div>
+      </div>
+    )}
 
     {addMode && (
       <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={() => !downloadProg.on && setAddMode(null)}>
