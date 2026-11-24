@@ -4,6 +4,7 @@ import { applyNodes, applyEdges, connect, ARROW } from './flowUtils';
 import * as audioEngine from './audio';
 import { getAssetURL, importFile, deleteBlob, revokeAssetURL, putBlob } from './assets';
 import { embeddingsSearch, embeddingsIndex, type ContextChunk, type RichContext } from './ai';
+import { resolveVariableText } from './textVariables';
 import {
   listProjects, readProject, writeProject, createProjectRecord, deleteProjectRecord,
   renameProjectRecord, duplicateProjectRecord, getActiveId, setActiveId, migrateLegacy,
@@ -62,6 +63,7 @@ export interface Character {
   hairStyle: 'short' | 'messy' | 'long'; appearance: string; personality: string; vars: Variable[];
   sprites?: Partial<Record<string, string>>;
   spriteMeta?: Partial<Record<string, { source: string; prompt?: string; seed?: number; model?: string }>>;
+  isNarrator?: boolean;
 }
 export interface Background { id: string; name: string; kind: 'park' | 'cafe' | 'city' | 'room'; assetId?: string; }
 export interface Track { id: string; name: string; freqs: number[]; color: string; assetId?: string; }
@@ -77,6 +79,8 @@ export interface StageEntity {
   key: string; kind: EntityKind; refId: string; src: string;
   x: number; y: number; scale: number; expression: string;
   effect: EntityEffect; moveEase?: string; duration: number; z: number; hiding?: boolean;
+  spriteType?: 'asset' | 'text' | 'geometry'; text?: string; backgroundColor?: string; textColor?: string;
+  geometryType?: 'line' | 'rectangle' | 'triangle' | 'circle'; strokeColor?: string; fillColor?: string; opacity?: number;
 }
 export interface Director {
   cps: number; fontSize: number; spriteScale: number; dim: number; boxOpacity: number;
@@ -320,7 +324,12 @@ function seed(): Project {
       edge('k_e_mark', 'k_d1'), edge('k_d1', 'k_e_hide'), edge('k_e_hide', 'k_jump'),
     ],
   };
+  characters.push(createNarratorCharacter());
   return { title: 'Орбита · визуальная новелла', scenes: [s1, s2, s3], characters, backgrounds, tracks, sprites: [] };
+}
+
+function createNarratorCharacter(): Character {
+  return { id: 'global', name: 'Рассказчик', isNarrator: true, color: '#f4ead8', hair: '#f4ead8', jacket: '#f4ead8', skin: '#f4ead8', hairStyle: 'short', appearance: '', personality: '', vars: [] };
 }
 
 function inferType(v: any): VarType {
@@ -345,6 +354,7 @@ function migrateNode(nd: any): Node {
   if (nd.type === 'jump') d.sceneId = d.sceneId ?? '';
   if (nd.type === 'entity') {
     d.entityKind = d.entityKind === 'sprite' ? 'sprite' : 'character';
+    d.spriteType = ['text', 'geometry', 'asset'].includes(d.spriteType) ? d.spriteType : 'asset';
     d.action = ['show', 'move', 'hide'].includes(d.action) ? d.action : 'show';
     const legacy = d.effect ?? 'fade';
     d.fxShow = d.fxShow ?? legacy;
@@ -386,7 +396,7 @@ function migrateProject(p: any): Project {
       const edges = migrateEdges({ nodes, edges: sc.edges ?? [] });
       return { ...sc, nodes: nodes.filter((n: any) => n.type !== 'bridge'), edges: healEdges({ nodes, edges }, bridges) };
     }),
-    characters: (p.characters ?? []).map((c: any) => ({ ...c, sprites: c.sprites ?? {}, vars: (c.vars ?? []).map((v: any) => ({ key: v.key, type: v.type ?? inferType(v.value), value: v.value ?? 0 })) })),
+    characters: (() => { const list = (p.characters ?? []).map((c: any) => ({ ...c, sprites: c.sprites ?? {}, vars: (c.vars ?? []).map((v: any) => ({ key: v.key, type: v.type ?? inferType(v.value), value: v.value ?? 0 })) })); const narrator = list.find((c: any) => c.id === 'global' || c.isNarrator); if (narrator) { narrator.id = 'global'; narrator.name = 'Рассказчик'; narrator.isNarrator = true; } else list.push(createNarratorCharacter()); return list; })(),
     backgrounds: p.backgrounds ?? [],
     tracks: p.tracks ?? [],
     sprites: p.sprites ?? [],
@@ -609,6 +619,7 @@ export const useStore = create<Store>((set, get) => {
   };
 
   const entityKey = (kind: EntityKind, refId: string) => `${kind === 'character' ? 'char' : 'sprite'}:${refId}`;
+  const entityRefId = (d: any, nodeId: string) => d.entityKind !== 'sprite' ? d.characterId : ['text', 'geometry'].includes(d.spriteType) ? (d.entityId || `object_${nodeId}`) : d.spriteId;
   const markFx = (ms: number) => { lastFxUntil = Math.max(lastFxUntil, Date.now() + ms); };
 
   const scheduleHide = (nodeId: string, key: string, ms: number) => {
@@ -625,9 +636,9 @@ export const useStore = create<Store>((set, get) => {
     }, ms);
   };
 
-  const applyEntityTo = (entities: Record<string, StageEntity>, sprites: Record<string, { expression: string }>, nodeId: string, d: any) => {
+  const applyEntityTo = (entities: Record<string, StageEntity>, sprites: Record<string, { expression: string }>, nodeId: string, d: any, vars: Record<string, any> = get().player.vars) => {
     const kind: EntityKind = d.entityKind === 'sprite' ? 'sprite' : 'character';
-    const refId = kind === 'character' ? d.characterId : d.spriteId;
+    const refId = entityRefId(d, nodeId);
     if (!refId) return;
     const key = entityKey(kind, refId);
     const fx: EntityEffect = d.action === 'show' ? (d.fxShow ?? 'fade') : d.action === 'move' ? 'none' : (d.fxHide ?? 'fade');
@@ -654,6 +665,11 @@ export const useStore = create<Store>((set, get) => {
       duration: num(d.duration, 0.6),
       z: d.z ? num(d.z, 1) : (prev?.z ?? Object.keys(entities).length + 1),
       hiding: false,
+      spriteType: kind === 'sprite' ? (d.spriteType ?? 'asset') : undefined,
+      text: kind === 'sprite' && d.spriteType === 'text' ? resolveVariableText(String(d.text ?? ''), get().project.characters, vars) : undefined,
+      backgroundColor: d.backgroundColor ?? '', textColor: d.textColor ?? '#f4ead8',
+      geometryType: d.geometryType ?? 'rectangle', strokeColor: d.strokeColor ?? '#f4ead8', fillColor: d.fillColor ?? '',
+      opacity: typeof d.opacity === 'number' ? d.opacity : 100,
     };
     entities[key] = ent;
     if (kind === 'character') sprites[refId] = { expression: ent.expression };
@@ -704,9 +720,9 @@ export const useStore = create<Store>((set, get) => {
       if (node.type === 'background') bg = d.bg ?? bg;
       if (node.type === 'entity') {
         const kind: EntityKind = d.entityKind === 'sprite' ? 'sprite' : 'character';
-        const key = entityKey(kind, kind === 'character' ? d.characterId : d.spriteId);
+        const key = entityKey(kind, entityRefId(d, node.id));
         if (d.action === 'hide') delete entities[key];
-        else applyEntityTo(entities, sprites, node.id, d);
+        else applyEntityTo(entities, sprites, node.id, d, vars);
       }
       if (node.type === 'dialogue' && d.characterId) {
         const key = entityKey('character', d.characterId);
@@ -784,7 +800,7 @@ export const useStore = create<Store>((set, get) => {
         });
         markFx(dur * 1000);
         if (d.action === 'hide' && !instantHide) {
-          const key = entityKey(d.entityKind === 'sprite' ? 'sprite' : 'character', d.entityKind === 'sprite' ? d.spriteId : d.characterId);
+          const key = entityKey(d.entityKind === 'sprite' ? 'sprite' : 'character', entityRefId(d, id));
           scheduleHide(id, key, dur * 1000 + 60);
         }
         audioEngine.audioTick?.(560, 0.07, 0.07);
@@ -854,7 +870,7 @@ export const useStore = create<Store>((set, get) => {
             lineSeq: seq,
             player: {
               ...s.player,
-              line: { id: seq, nodeId: id, characterId: d.characterId, text: d.text ?? '', expression },
+              line: { id: seq, nodeId: id, characterId: d.characterId, text: resolveVariableText(String(d.text ?? ''), s.project.characters, s.player.vars), expression },
               entities: present ? { ...s.player.entities, [key]: { ...s.player.entities[key], expression } } : s.player.entities,
               sprites: present ? { ...s.player.sprites, [d.characterId]: { expression } } : s.player.sprites,
             },
@@ -872,7 +888,7 @@ export const useStore = create<Store>((set, get) => {
           audioEngine.audioTick?.(760, 0.07, 0.08);
           next(id, idx >= 0 ? `cond_${idx}` : 'cond_else');
         } else {
-          set(s => ({ player: { ...s.player, pending: { nodeId: id, options: d.options ?? [], prompt: d.prompt ?? 'Выбор' } } }));
+          set(s => ({ player: { ...s.player, pending: { nodeId: id, options: (d.options ?? []).map((o: any) => ({ ...o, text: resolveVariableText(String(o.text ?? ''), s.project.characters, s.player.vars) })), prompt: resolveVariableText(String(d.prompt ?? 'Выбор'), s.project.characters, s.player.vars) } } }));
           audioEngine.audioTick?.(440, 0.09, 0.08);
         }
         break;
@@ -910,7 +926,7 @@ export const useStore = create<Store>((set, get) => {
         return { player: { ...s.player, entities, sprites } };
       });
       if (d.action === 'hide' && !instantHide) {
-        const key = entityKey(d.entityKind === 'sprite' ? 'sprite' : 'character', d.entityKind === 'sprite' ? d.spriteId : d.characterId);
+        const key = entityKey(d.entityKind === 'sprite' ? 'sprite' : 'character', entityRefId(d, node.id));
         scheduleHide(node.id, key, dur * 1000 + 60);
       }
     }
@@ -1046,7 +1062,7 @@ export const useStore = create<Store>((set, get) => {
       audioEngine.audioEnsure?.();
       audioEngine.audioTick?.(760, 0.06, 0.08);
       const p = get().project;
-      const firstChar = p.characters[0];
+      const firstChar = p.characters.find(ch => !ch.isNarrator) ?? p.characters[0];
       const defaults: Record<NodeKind, any> = {
         start: {},
         end: {},
@@ -1060,7 +1076,7 @@ export const useStore = create<Store>((set, get) => {
         variable: { charId: firstChar?.id, key: firstChar?.vars[0]?.key ?? 'trust', varType: firstChar?.vars[0]?.type ?? 'int', op: 'add', value: 1 },
         background: { bg: p.backgrounds[0]?.id, fx: 'fade', duration: 0.7 },
         music: { track: p.tracks[0]?.id, mode: 'music' },
-        entity: { entityKind: 'character', characterId: firstChar?.id, spriteId: p.sprites[0]?.id, action: 'show', fxShow: 'fade', fxMove: 'ease-out', fxHide: 'fade', x: 50, y: 74, scale: 100, z: 0, duration: 0.6 },
+        entity: { entityKind: 'character', characterId: firstChar?.id, spriteId: p.sprites[0]?.id, spriteType: 'asset', action: 'show', fxShow: 'fade', fxMove: 'ease-out', fxHide: 'fade', x: 50, y: 74, scale: 100, z: 0, duration: 0.6, opacity: 100, backgroundColor: '', textColor: '#f4ead8', geometryType: 'rectangle', strokeColor: '#f4ead8', fillColor: '' },
         pause: { seconds: 1 },
         jump: { sceneId: '' },
       };
@@ -1240,8 +1256,9 @@ export const useStore = create<Store>((set, get) => {
       set(s => ({ project: { ...s.project, characters: [...s.project.characters, ch] }, selectedCharId: ch.id, leftTab: 'chars' }));
       get().toast('Персонаж создан');
     },
-    updateCharacter: (id, patch) => set(s => ({ project: { ...s.project, characters: s.project.characters.map(c => c.id === id ? { ...c, ...patch } : c) } })),
+    updateCharacter: (id, patch) => set(s => ({ project: { ...s.project, characters: s.project.characters.map(c => c.id === id ? (c.isNarrator ? { ...c, vars: patch.vars ?? c.vars } : { ...c, ...patch }) : c) } })),
     deleteCharacter: id => {
+      if (id === 'global' || get().project.characters.find(x => x.id === id)?.isNarrator) { get().toast('Рассказчика удалить нельзя'); return; }
       const c = get().project.characters.find(x => x.id === id);
       get().commit();
       Object.values(c?.sprites ?? {}).forEach(aid => aid && scheduleAssetPurge(aid));
@@ -1485,7 +1502,7 @@ export const useStore = create<Store>((set, get) => {
           ],
           edges: [],
         }],
-        characters: [], backgrounds: [], tracks: [], sprites: [],
+        characters: [createNarratorCharacter()], backgrounds: [], tracks: [], sprites: [],
       };
       const meta = createProjectRecord(p.title, p);
       setActiveId(meta.id);
@@ -1634,9 +1651,11 @@ export const useStore = create<Store>((set, get) => {
         }
         if (n.type === 'entity') {
           if (d.entityKind === 'sprite') {
-            if (!st.project.sprites.some(x => x.id === d.spriteId)) out.push({ nodeId: n.id, msg: 'Спрайт-ассет не выбран' });
-          } else if (!st.project.characters.some(c => c.id === d.characterId)) {
-            out.push({ nodeId: n.id, msg: 'Персонаж сущности не выбран' });
+            const spriteType = d.spriteType ?? 'asset';
+            if (spriteType === 'asset' && !st.project.sprites.some(x => x.id === d.spriteId)) out.push({ nodeId: n.id, msg: 'Спрайт-ассет не выбран' });
+            if ((spriteType === 'text' || spriteType === 'geometry') && !String(d.entityId ?? '').trim()) out.push({ nodeId: n.id, msg: 'Укажите ID текстового или геометрического объекта для связи с другими нодами' });
+          } else if (!st.project.characters.some(c => c.id === d.characterId && !c.isNarrator)) {
+            out.push({ nodeId: n.id, msg: 'Персонаж сущности не выбран или является Рассказчиком' });
           }
         }
         if (n.type === 'variable') {
