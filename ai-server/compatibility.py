@@ -10,6 +10,7 @@ import importlib.util
 import json
 import os
 import platform
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -18,6 +19,30 @@ from typing import Any, Optional
 
 WEIGHT_SUFFIXES = (".safetensors", ".bin", ".pt", ".pth", ".ckpt", ".gguf", ".ggml", ".onnx")
 SKIP_DIRS = {".git", ".cache", "__pycache__", "node_modules"}
+
+
+BUILTIN_TRANSFORMERS_TYPES = {
+    "qwen", "qwen2", "qwen2_moe", "qwen3", "qwen3_moe", "qwen3_next",
+    "llama", "mistral", "mixtral", "gemma", "gemma2", "gemma3", "gemma3_text",
+    "phi", "phi3", "phi4", "deepseek_v2", "deepseek_v3", "deepseek_vl",
+    "qwen2_vl", "qwen2_5_vl", "qwen3_vl", "paligemma", "idefics", "idefics2",
+    "llava", "llava_next", "pixtral", "granite", "granitemoe", "cohere",
+    "cohere2", "command-r", "starcoder2", "jamba", "falcon", "bloom",
+    "opt", "gpt_neox", "gpt2", "bert", "roberta", "t5", "mt5", "bart",
+}
+
+
+def _has_native_transformers_config(model_type: str) -> bool:
+    """Check native Transformers registration without enabling remote code."""
+    name = str(model_type or "").strip().lower()
+    if not name or not re.fullmatch(r"[a-z0-9_]+", name):
+        return False
+    if name in BUILTIN_TRANSFORMERS_TYPES:
+        return True
+    try:
+        return importlib.util.find_spec(f"transformers.models.{name}") is not None
+    except (ImportError, ModuleNotFoundError, ValueError, AttributeError):
+        return False
 
 
 def _gb(value: Optional[int | float]) -> Optional[float]:
@@ -359,12 +384,14 @@ def inspect_local_model(model_path: str, requested_kind: str) -> dict[str, Any]:
         architecture_note = "В папке не обнаружены файлы весов модели."
 
     auto_map = config.get("auto_map") or {}
-    custom_code = bool(auto_map)
+    custom_code_present = bool(auto_map)
+    native_config_available = _has_native_transformers_config(str(config.get("model_type") or ""))
+    custom_code = custom_code_present and not native_config_available
     if custom_code:
         architecture_supported = False
         architecture_note = (
-            "В config.json указан auto_map с пользовательским кодом. "
-            "Автоматическое выполнение стороннего кода отключено в целях безопасности."
+            "В config.json указан auto_map, но штатная архитектура Transformers не обнаружена. "
+            "Для безопасности выполнение стороннего кода отключено."
         )
 
     return {
@@ -381,7 +408,9 @@ def inspect_local_model(model_path: str, requested_kind: str) -> dict[str, Any]:
         "quant_method": quant_method if "quant_method" in locals() else None,
         "processor_present": processor_present,
         "tokenizer_present": tokenizer_present,
+        "custom_code_present": custom_code_present,
         "custom_code_required": custom_code,
+        "native_transformers_config": native_config_available if config else False,
         "architecture_supported": architecture_supported,
         "architecture_note": architecture_note,
         **size,
@@ -411,8 +440,12 @@ def build_compatibility_report(
     ram_total = ((hardware.get("memory") or {}).get("ram_total_gb") or 0) * (1024 ** 3)
     ram_free = ((hardware.get("memory") or {}).get("ram_available_gb") or 0) * (1024 ** 3)
     weight_bytes = int(model.get("weight_bytes") or 0)
-    estimated_gpu_bytes = int(weight_bytes * (1.25 if requested_kind == "llm" else 1.55) + 1.5 * (1024 ** 3))
-    estimated_cpu_bytes = int(weight_bytes * (2.15 if requested_kind == "llm" else 2.35) + 2 * (1024 ** 3))
+    # Disk weights often already use BF16/FP16/FP8. The old multipliers made
+    # normal 14B LLMs and Qwen-Image pipelines look much larger than they are.
+    # Keep a modest activation/runtime allowance; treat these as estimates, not
+    # hard capacity requirements.
+    estimated_gpu_bytes = int(weight_bytes * (1.08 if requested_kind == "llm" else 1.12) + 1 * (1024 ** 3))
+    estimated_cpu_bytes = int(weight_bytes * (1.35 if requested_kind == "llm" else 1.5) + 3 * (1024 ** 3))
     profile: dict[str, Any] = {
         "device": "cpu",
         "dtype": "float32",
@@ -478,7 +511,7 @@ def build_compatibility_report(
                         else device.get("total_vram_bytes") or 0)
                     for device in cuda_devices
                 )
-                safe_vram = int(available_vram * 0.82)
+                safe_vram = int(available_vram * 0.90)
                 dtype = "bfloat16" if all(device.get("bf16") for device in cuda_devices) else "float16"
                 profile.update(device="cuda", dtype=dtype, device_map="auto")
                 if model.get("quantized"):
@@ -495,7 +528,7 @@ def build_compatibility_report(
                             status = "blocked"
                             reasons.append("Без Accelerate модель нужно временно разместить в RAM; доступной оперативной памяти недостаточно.")
                 elif software.get("bitsandbytes") and software.get("accelerate") and not model.get("quantized"):
-                    quant_estimate = int(weight_bytes * 0.48 + 1.5 * (1024 ** 3))
+                    quant_estimate = int(weight_bytes * 0.30 + 1.5 * (1024 ** 3))
                     if quant_estimate <= safe_vram:
                         profile.update(strategy="gpu_4bit", quantization="4bit-nf4",
                                        estimated_vram_gb=_gb(quant_estimate))
@@ -512,18 +545,22 @@ def build_compatibility_report(
                     else:
                         status = "blocked"
                         reasons.append("Не хватает доступной VRAM и RAM для безопасной загрузки этой модели.")
-                elif ram_free >= estimated_cpu_bytes * 0.85 and software.get("accelerate"):
+                elif ram_free >= estimated_cpu_bytes * 0.75 and software.get("accelerate"):
                     profile.update(strategy="gpu_cpu_offload", offload=True)
                     status = "warning"
-                    warnings.append("Модель не помещается целиком в VRAM; потребуется автоматическое размещение частей модели в RAM.")
-                elif not model.get("quantized") and ram_free >= estimated_cpu_bytes * 1.25:
+                    warnings.append("Модель не помещается целиком в VRAM; будет использовано размещение части слоёв в RAM.")
+                elif not model.get("quantized") and ram_free >= weight_bytes * 1.15 + 2 * (1024 ** 3):
                     profile.update(device="cpu", dtype="float32", strategy="cpu_fp32", device_map="cpu",
                                    quantization="none")
                     status = "warning"
                     warnings.append("Модель не помещается в GPU; выбран CPU FP32 режим, который будет медленнее.")
+                elif available_vram >= weight_bytes * 0.85 and ram_free >= weight_bytes * 1.05:
+                    profile.update(strategy="best_effort_gpu", offload=False)
+                    status = "warning"
+                    warnings.append("Точная оценка памяти пограничная. Разрешена пробная загрузка на GPU; при нехватке памяти сервер вернёт фактическую ошибку.")
                 else:
                     status = "blocked"
-                    reasons.append("Не хватает памяти GPU/CPU для безопасной загрузки с текущими библиотеками.")
+                    reasons.append("Не хватает оценочной памяти GPU и RAM даже для резервного режима загрузки.")
             else:
                 if other_accelerator:
                     backend = str(other_accelerator.get("backend"))
@@ -547,12 +584,12 @@ def build_compatibility_report(
                 free_vram = int(cuda.get("free_vram_bytes") or 0)
                 total_vram = int(cuda.get("total_vram_bytes") or 0)
                 available_vram = free_vram if cuda.get("free_vram_bytes") is not None else total_vram
-                safe_vram = int(available_vram * 0.82)
+                safe_vram = int(available_vram * 0.90)
                 profile.update(device="cuda", dtype="float16", device_map="cuda")
                 if estimated_gpu_bytes <= safe_vram:
                     profile.update(strategy="full_gpu")
                 elif software.get("bitsandbytes") and software.get("accelerate") and os.path.isdir(os.path.join(model.get("path") or "", "transformer")):
-                    quant_estimate = int(weight_bytes * 0.48 + 2 * (1024 ** 3))
+                    quant_estimate = int(weight_bytes * 0.30 + 2 * (1024 ** 3))
                     if quant_estimate <= safe_vram:
                         profile.update(strategy="gpu_4bit", quantization="4bit-nf4",
                                        estimated_vram_gb=_gb(quant_estimate))
@@ -568,17 +605,21 @@ def build_compatibility_report(
                     else:
                         status = "blocked"
                         reasons.append("Недостаточно VRAM/RAM для безопасного запуска Diffusers-модели.")
-                elif software.get("accelerate") and ram_free >= estimated_cpu_bytes * 0.85 and available_vram >= 2 * (1024 ** 3):
+                elif software.get("accelerate") and ram_free >= estimated_cpu_bytes * 0.75 and available_vram >= 2 * (1024 ** 3):
                     profile.update(strategy="sequential_cpu_offload", offload=True)
                     status = "warning"
                     warnings.append("Модель будет загружаться с последовательным CPU offload; генерация будет медленнее.")
-                elif ram_free >= estimated_cpu_bytes * 1.25:
+                elif ram_free >= weight_bytes * 1.15 + 2 * (1024 ** 3):
                     profile.update(device="cpu", dtype="float32", strategy="cpu", device_map="cpu")
                     status = "warning"
                     warnings.append("GPU-памяти недостаточно; выбран CPU-режим, который будет значительно медленнее.")
+                elif available_vram >= weight_bytes * 0.85 and ram_free >= weight_bytes * 1.05:
+                    profile.update(strategy="best_effort_gpu", offload=False)
+                    status = "warning"
+                    warnings.append("Оценка памяти пограничная. Разрешена пробная загрузка на GPU; при нехватке памяти сервер вернёт фактическую ошибку.")
                 else:
                     status = "blocked"
-                    reasons.append("Недостаточно VRAM/RAM для безопасного запуска Diffusers-модели.")
+                    reasons.append("Недостаточно оценочной VRAM/RAM даже для резервного режима Diffusers.")
             elif other_accelerator:
                 backend = str(other_accelerator.get("backend"))
                 profile.update(device=backend, dtype="float16" if backend == "mps" else "bfloat16",
