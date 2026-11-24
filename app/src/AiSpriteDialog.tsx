@@ -69,7 +69,8 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
     const final = await aiPollJob(cfg.endpoint, jobId, j => {
       if (!aliveRef.current) return;
       setProgress(j.progress ?? 0);
-      setStage(j.stage || label);
+      const warning = j.warnings?.[0] ? '⚠️ ' + j.warnings[0] + ' · ' : '';
+      setStage(warning + (j.stage || label));
     }, ctl.signal);
     jobRef.current = null;
     if (final.state !== 'done') throw new Error(final.message || (final.state === 'cancelled' ? 'Отменено' : 'Ошибка генерации'));

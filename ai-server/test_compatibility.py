@@ -83,13 +83,16 @@ class CompatibilityTests(unittest.TestCase):
             self.assertEqual(report["status"], "warning")
             self.assertEqual(report["profile"]["strategy"], "cpu_fp32")
 
-    def test_blocks_when_cpu_memory_is_insufficient(self):
+    def test_low_cpu_memory_is_warning_and_does_not_prevent_load_attempt(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             self._make_llm(root, {"model_type": "llama", "architectures": ["LlamaForCausalLM"]})
             report = build_compatibility_report(temp, "llm", fake_hardware(1))
-            self.assertFalse(report["can_load"])
-            self.assertEqual(report["status"], "blocked")
+            self.assertTrue(report["can_load"])
+            self.assertTrue(report["load_allowed"])
+            self.assertEqual(report["status"], "warning")
+            self.assertEqual(report["diagnostic_status"], "blocked")
+            self.assertTrue(report["warnings"])
 
     def test_detects_onnx_as_unsupported_instead_of_transformers(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -182,8 +185,25 @@ class CompatibilityTests(unittest.TestCase):
                 "quantization_config": {"quant_method": "gptq"},
             })
             report = build_compatibility_report(temp, "llm", fake_hardware(64))
-            self.assertFalse(report["can_load"])
-            self.assertEqual(report["status"], "blocked")
+            self.assertTrue(report["can_load"])
+            self.assertEqual(report["status"], "warning")
+            self.assertEqual(report["diagnostic_status"], "blocked")
+            self.assertIn("загрузка не блокируется", report["warnings"][0].lower())
+
+
+    def test_existing_unknown_architecture_is_advisory_not_a_load_block(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self._make_llm(root, {
+                "model_type": "custom",
+                "architectures": ["CustomForCausalLM"],
+                "auto_map": {"AutoModelForCausalLM": "modeling_custom.CustomModel"},
+            })
+            report = build_compatibility_report(temp, "llm", fake_hardware(64))
+            self.assertTrue(report["can_load"])
+            self.assertEqual(report["status"], "warning")
+            self.assertEqual(report["diagnostic_status"], "unsupported")
+            self.assertTrue(report["warnings"])
 
 
 if __name__ == "__main__":

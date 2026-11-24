@@ -646,16 +646,32 @@ def build_compatibility_report(
     if status == "unknown":
         reasons.append("Недостаточно данных для оценки совместимости.")
 
+    # This is an estimate, not an execution policy. Keep the original diagnostic
+    # result for transparency, but do not deny a load attempt for an existing
+    # model folder. Unsupported formats/backends and real OOMs will still fail
+    # naturally in the actual loader with the concrete runtime error.
+    diagnostic_status = status
+    load_allowed = bool(model.get("exists"))
+    if load_allowed and diagnostic_status in ("unsupported", "blocked", "unknown"):
+        warnings.insert(
+            0,
+            "Предварительная проверка обнаружила возможные ограничения. Загрузка не блокируется: сервер попробует запустить модель и покажет фактическую ошибку, если она возникнет.",
+        )
+        warnings.extend(reason for reason in reasons if reason not in warnings)
+        status = "warning"
+
     return {
         "status": status,
-        "can_load": status in ("ready", "warning"),
+        "diagnostic_status": diagnostic_status,
+        "can_load": load_allowed,
+        "load_allowed": load_allowed,
         "kind": requested_kind,
         "model": model,
         "hardware": hardware,
         "profile": profile,
         "reasons": reasons,
         "warnings": warnings,
-        "requires_smoke_test": status in ("ready", "warning"),
+        "requires_smoke_test": load_allowed,
         "limitations": [
             "Оценка памяти приблизительная и не гарантирует успешную генерацию.",
             "Фактический результат зависит от длины контекста, разрешения изображения и других процессов.",
