@@ -48,6 +48,18 @@ function runtime(G: any) {
   const chars = () => P.characters;
   const charById = (id: string) => chars().find((c: any) => c.id === id);
   const node = (id: string) => scene.nodes.find((n: any) => n.id === id);
+  function characterAlias(c: any) { return c && (c.isNarrator || c.id === 'global') ? 'GLOBAL' : String(c?.name || '').trim().toLocaleUpperCase().replace(/[^\\p{L}\\p{N}_-]+/gu, '_').replace(/^_+|_+$/g, ''); }
+  function resolveTextVariables(source: any) {
+    const aliases = new Map(chars().map((c: any) => [characterAlias(c), c]));
+    return String(source ?? '').replace(/@([\\p{L}\\p{N}_-]+)\\.([\\p{L}\\p{N}_-]+)/gu, (token, alias, key) => {
+      const character: any = aliases.get(String(alias).toLocaleUpperCase());
+      if (!character) return token;
+      const variable = (character.vars || []).find((v: any) => String(v.key).toLocaleUpperCase() === String(key).toLocaleUpperCase());
+      if (!variable) return token;
+      const id = character.id + '.' + variable.key;
+      return String(Object.prototype.hasOwnProperty.call(vars, id) ? vars[id] : variable.value ?? '');
+    });
+  }
   const assetUrl = (id?: string) => (id && ASSETS[id]) || null;
 
   function resetVars() {
@@ -150,10 +162,7 @@ function runtime(G: any) {
     Object.values(entities).sort((a: any, b: any) => a.z - b.z).forEach((e: any) => {
       const wrap = doc.createElement('div');
       wrap.className = 'ent';
-      wrap.style.left = e.x + '%';
-      wrap.style.top = e.y + '%';
-      wrap.style.height = e.scale + '%';
-      wrap.style.zIndex = String(e.z);
+      wrap.style.left = e.x + '%'; wrap.style.top = e.y + '%'; wrap.style.height = e.scale + '%'; wrap.style.zIndex = String(e.z);
       if (e.moveEase && !e.hiding) {
         const css = G.moveCss[e.moveEase] || 'ease';
         wrap.style.transition = 'left ' + e.duration + 's ' + css + ', top ' + e.duration + 's ' + css + ', height ' + e.duration + 's ' + css;
@@ -163,11 +172,40 @@ function runtime(G: any) {
       inner.style.animationDuration = e.duration + 's';
       if (e.hiding) inner.style.animationDirection = 'reverse';
       const c = e.kind === 'character' ? charById(e.refId) : null;
-      const url = e.kind === 'character' ? assetUrl(c && c.sprites && c.sprites[e.expression]) : assetUrl(e.assetId);
-      const img = doc.createElement('img');
-      img.src = url || (c ? spriteSVG(c, e.expression) : '');
-      img.alt = '';
-      inner.appendChild(img);
+      if (e.kind === 'sprite' && e.spriteType === 'text') {
+        const text = doc.createElement('div');
+        text.textContent = e.text || '';
+        text.style.height = '100%'; text.style.minWidth = '180px'; text.style.maxWidth = '48vw';
+        text.style.display = 'flex'; text.style.alignItems = 'center'; text.style.justifyContent = 'center';
+        text.style.padding = '0.65em 1em'; text.style.borderRadius = '12px';
+        text.style.whiteSpace = 'pre-wrap'; text.style.textAlign = 'center'; text.style.lineHeight = '1.45';
+        text.style.fontSize = 'clamp(12px, 2.4vw, 30px)';
+        text.style.color = e.textColor || '#f4ead8';
+        text.style.background = e.backgroundColor || 'transparent';
+        text.style.opacity = String((e.opacity == null ? 100 : e.opacity) / 100);
+        inner.appendChild(text);
+      } else if (e.kind === 'sprite' && e.spriteType === 'geometry') {
+        const ns = 'http://www.w3.org/2000/svg';
+        const svg = doc.createElementNS(ns, 'svg');
+        svg.setAttribute('viewBox', '0 0 100 100');
+        svg.setAttribute('width', '100'); svg.setAttribute('height', '100');
+        svg.style.height = '100%'; svg.style.width = 'auto'; svg.style.opacity = String((e.opacity == null ? 100 : e.opacity) / 100);
+        const shapeName = e.geometryType === 'line' ? 'line' : e.geometryType === 'triangle' ? 'polygon' : e.geometryType === 'circle' ? 'circle' : 'rect';
+        const shape = doc.createElementNS(ns, shapeName);
+        if (shapeName === 'line') { shape.setAttribute('x1','8'); shape.setAttribute('y1','50'); shape.setAttribute('x2','92'); shape.setAttribute('y2','50'); }
+        else if (shapeName === 'polygon') shape.setAttribute('points','50,7 93,91 7,91');
+        else if (shapeName === 'circle') { shape.setAttribute('cx','50'); shape.setAttribute('cy','50'); shape.setAttribute('r','42'); }
+        else { shape.setAttribute('x','8'); shape.setAttribute('y','8'); shape.setAttribute('width','84'); shape.setAttribute('height','84'); }
+        shape.setAttribute('fill', e.fillColor || (shapeName === 'line' ? 'none' : 'none'));
+        shape.setAttribute('stroke', e.strokeColor || '#f4ead8'); shape.setAttribute('stroke-width','3');
+        svg.appendChild(shape); inner.appendChild(svg);
+      } else {
+        const url = e.kind === 'character' ? assetUrl(c && c.sprites && c.sprites[e.expression]) : assetUrl(e.assetId);
+        const img = doc.createElement('img');
+        img.src = url || (c ? spriteSVG(c, e.expression) : '');
+        img.alt = '';
+        inner.appendChild(img);
+      }
       wrap.appendChild(inner);
       entLayer.appendChild(wrap);
     });
@@ -176,13 +214,30 @@ function runtime(G: any) {
   function renderLine() {
     if (!line) { box.classList.remove('show'); return; }
     const c = charById(line.characterId);
+    const narrator = !!(c && (c.isNarrator || c.id === 'global')) || line.characterId === 'global';
     box.classList.add('show');
-    nameEl.textContent = (c && c.name) || '???';
-    nameEl.style.background = (c && c.color) || '#ffb454';
-    box.style.borderColor = ((c && c.color) || '#ffb454') + '88';
+    if (narrator) {
+      nameEl.style.display = 'none';
+      box.style.left = '50%'; box.style.right = 'auto'; box.style.width = 'min(900px,84%)';
+      box.style.bottom = '10vh'; box.style.transform = 'translateX(-50%)';
+      box.style.background = 'rgba(244,234,216,0.88)';
+      box.style.border = '1px solid rgba(255,255,255,0.55)';
+      box.style.borderColor = 'rgba(255,255,255,0.55)';
+      box.style.boxShadow = '0 8px 36px rgba(0,0,0,0.35)';
+      textEl.style.color = '#0b0e15'; textEl.style.textAlign = 'center';
+    } else {
+      nameEl.style.display = '';
+      box.style.left = ''; box.style.right = ''; box.style.width = ''; box.style.bottom = ''; box.style.transform = '';
+      box.style.background = 'rgba(11,14,21,' + (D.boxOpacity / 100) + ')';
+      box.style.border = ''; box.style.borderColor = ((c && c.color) || '#ffb454') + '88';
+      box.style.boxShadow = '0 0 24px ' + ((c && c.color) || '#ffb454') + '22';
+      textEl.style.color = ''; textEl.style.textAlign = '';
+      nameEl.textContent = (c && c.name) || '???';
+      nameEl.style.background = (c && c.color) || '#ffb454';
+    }
     textEl.style.fontSize = D.fontSize + 'px';
     textEl.textContent = line.text.slice(0, typed);
-    nextHint.style.opacity = typed >= line.text.length ? '1' : '0';
+    nextHint.style.opacity = !narrator && typed >= line.text.length ? '1' : '0';
   }
 
   function startTypewriter() {
@@ -207,9 +262,10 @@ function runtime(G: any) {
     else finish();
   }
 
-  function applyEntity(d: any) {
+  function applyEntity(d: any, nodeId: string) {
     const kind = d.entityKind === 'sprite' ? 'sprite' : 'character';
-    const refId = kind === 'character' ? d.characterId : d.spriteId;
+    const spriteType = d.spriteType || 'asset';
+    const refId = kind === 'character' ? d.characterId : (spriteType === 'text' || spriteType === 'geometry' ? (d.entityId || ('object_' + nodeId)) : d.spriteId);
     if (!refId) return;
     const key = kind + ':' + refId;
     const fx = d.action === 'show' ? (d.fxShow || 'fade') : d.action === 'move' ? 'none' : (d.fxHide || 'fade');
@@ -226,6 +282,11 @@ function runtime(G: any) {
     const sp = kind === 'sprite' ? P.sprites.find((x: any) => x.id === refId) : null;
     entities[key] = {
       key, kind, refId, assetId: sp && sp.assetId,
+      spriteType: kind === 'sprite' ? spriteType : undefined,
+      text: kind === 'sprite' && spriteType === 'text' ? resolveTextVariables(d.text || '') : undefined,
+      backgroundColor: d.backgroundColor || '', textColor: d.textColor || '#f4ead8',
+      geometryType: d.geometryType || 'rectangle', strokeColor: d.strokeColor || '#f4ead8', fillColor: d.fillColor || '',
+      opacity: d.opacity == null ? 100 : d.opacity,
       x: d.x != null ? d.x : (prev ? prev.x : 50),
       y: d.y != null ? d.y : (prev ? prev.y : 74),
       scale: d.scale != null ? d.scale : (prev ? prev.scale : 100),
@@ -267,7 +328,7 @@ function runtime(G: any) {
         next(id); break;
       }
       case 'entity':
-        applyEntity(d);
+        applyEntity(d, id);
         fxUntil = Date.now() + (d.duration || 0.6) * 1000;
         next(id); break;
       case 'variable': {
@@ -304,7 +365,7 @@ function runtime(G: any) {
         return;
       }
       case 'dialogue': {
-        line = { characterId: d.characterId, text: d.text || '', expression: d.expression || 'neutral' };
+        line = { nodeId: id, characterId: d.characterId, text: resolveTextVariables(d.text || ''), expression: d.expression || 'neutral' };
         const key = 'character:' + d.characterId;
         if (entities[key] && !entities[key].hiding) { entities[key].expression = line.expression; renderEntities(); }
         startTypewriter();
@@ -328,10 +389,10 @@ function runtime(G: any) {
           next(id, idx >= 0 ? 'cond_' + idx : 'cond_else');
           return;
         }
-        pending = { nodeId: id, options: d.options || [] };
+        pending = { nodeId: id, options: (d.options || []).map((o: any) => ({ ...o, text: resolveTextVariables(o.text || '') })) };
         const h = doc.createElement('div');
         h.className = 'ch-title';
-        h.textContent = d.prompt || 'Выбор';
+        h.textContent = resolveTextVariables(d.prompt || 'Выбор');
         choices.appendChild(h);
         pending.options.forEach((o: any, i: number) => {
           const b = doc.createElement('button');
@@ -361,8 +422,7 @@ function runtime(G: any) {
     if (!line) return;
     if (typed < line.text.length) { typed = line.text.length; if (typeTimer) clearInterval(typeTimer); renderLine(); return; }
     guard = 0;
-    const cur = scene.nodes.find((n: any) => n.type === 'dialogue' && n.data && n.data.text === line.text);
-    if (cur) next(cur.id);
+    if (line.nodeId) next(line.nodeId);
   }
 
   stage.addEventListener('click', () => advance());
