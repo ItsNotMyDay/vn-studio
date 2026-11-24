@@ -40,7 +40,7 @@ try:
     for _auto_name in (
         "AutoTokenizer", "AutoProcessor", "AutoModel", "AutoModelForCausalLM",
         "AutoModelForSeq2SeqLM", "AutoModelForMultimodalLM",
-        "AutoModelForImageTextToText",
+        "AutoModelForImageTextToText", "AutoModelForVision2Seq",
     ):
         getattr(_transformers, _auto_name, None)
 except Exception as _pre:
@@ -642,9 +642,11 @@ def _select_llm_adapter(path: str, model_info: dict):
         if model_cls is None:
             model_cls = getattr(transformers, "AutoModelForImageTextToText", None)
         if model_cls is None:
+            model_cls = getattr(transformers, "AutoModelForVision2Seq", None)
+        if model_cls is None:
             raise RuntimeError(
-                "Текущая версия Transformers не поддерживает мультимодальный AutoModel. "
-                "Обновите Transformers и повторите проверку совместимости."
+                "Текущая версия Transformers не содержит подходящего AutoModel для этой мультимодальной архитектуры. "
+                "Обновите Transformers или выберите поддерживаемый вариант модели."
             )
         processor_cls = getattr(transformers, "AutoProcessor", None)
         if processor_cls is None:
@@ -782,12 +784,26 @@ def load_llm(path: str):
         return False
 
 def _apply_template(template_source, messages, thinking):
-    try:
-        return template_source.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True, enable_thinking=thinking
-        )
-    except TypeError:
-        return template_source.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    apply_template = getattr(template_source, "apply_chat_template", None)
+    has_chat_template = bool(getattr(template_source, "chat_template", None))
+    if callable(apply_template) and has_chat_template:
+        try:
+            return apply_template(
+                messages, tokenize=False, add_generation_prompt=True, enable_thinking=thinking
+            )
+        except TypeError:
+            return apply_template(messages, tokenize=False, add_generation_prompt=True)
+
+    # Encoder-decoder and base text models often ship without a chat template.
+    # Keep the role boundaries explicit instead of failing after a successful load.
+    labels = {"system": "System", "user": "User", "assistant": "Assistant"}
+    turns = []
+    for message in messages:
+        role = labels.get(str(message.get("role", "user")), "User")
+        content = str(message.get("content", "")).strip()
+        turns.append(f"{role}:\\n{content}")
+    turns.append("Assistant:")
+    return "\\n\\n".join(turns)
 
 def _llm_generate(messages, max_tokens, temperature, thinking=False, on_chunk=None, cancel_check=None):
     import torch
@@ -835,7 +851,8 @@ def _llm_generate(messages, max_tokens, temperature, thinking=False, on_chunk=No
     if on_chunk is None:
         with LLM_LOCK, torch.no_grad():
             out = model.generate(**inputs, **gen_kw)
-        new = out[0][inputs["input_ids"].shape[1]:]
+        is_encoder_decoder = bool(getattr(getattr(model, "config", None), "is_encoder_decoder", False))
+        new = out[0] if is_encoder_decoder else out[0][inputs["input_ids"].shape[1]:]
         decoder = processor if processor is not None and hasattr(processor, "decode") else tokenizer
         return decoder.decode(new, skip_special_tokens=True).strip()
 
