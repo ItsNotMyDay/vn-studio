@@ -21,6 +21,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from compatibility import build_compatibility_report, get_hardware_report
+
 MODEL_ID_DEFAULT = os.environ.get("VN_MODEL_ID", "qwen_image_2.1_turbo_int8_convrot")
 MODEL_PATH_DEFAULT = os.environ.get("VN_MODEL_PATH", "")
 SEARCH_DIRS = [os.environ.get("VN_MODELS_DIR", "C:\\models"), os.path.join(os.path.dirname(__file__), "models")]
@@ -31,10 +33,16 @@ LLM_PATH_DEFAULT = os.environ.get("VN_LLM_PATH", "C:\\models\\qwen3-14b")
 app = FastAPI(title="VN Studio local AI server")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-# transformers lazy modules are NOT thread-safe on first import:
-# pre-import them once, single-threaded, at server startup.
+# Transformers lazy modules are NOT thread-safe on first import.
+# Touch the supported Auto classes once, single-threaded, when the server starts.
 try:
-    from transformers import AutoTokenizer, AutoModel, AutoModelForCausalLM  # noqa: F401
+    import transformers as _transformers
+    for _auto_name in (
+        "AutoTokenizer", "AutoProcessor", "AutoModel", "AutoModelForCausalLM",
+        "AutoModelForSeq2SeqLM", "AutoModelForMultimodalLM",
+        "AutoModelForImageTextToText",
+    ):
+        getattr(_transformers, _auto_name, None)
 except Exception as _pre:
     print("[warn] transformers pre-import:", _pre)
 
@@ -48,8 +56,8 @@ STATE = {"loaded": False, "model_id": None, "device": "cpu", "pipe": None, "erro
          "index_keys": [], "required": [], "explicit": [], "supports_alpha": False}
 
 LLM_LOCK = threading.Lock()
-LLM_STATE = {"model": None, "tokenizer": None, "loaded": False,
-             "path": None, "device": None, "error": None}
+LLM_STATE = {"model": None, "tokenizer": None, "processor": None, "loaded": False,
+             "path": None, "device": None, "adapter": None, "profile": None, "error": None}
 
 EMBED_PATH_DEFAULT = os.environ.get("VN_EMBED_PATH", "C:\\models\\e5-small")
 EMBED_INDEX_DIR = os.path.join(os.path.dirname(__file__), "embeddings")
@@ -239,6 +247,11 @@ class ModelDownloadReq(BaseModel):
     repo_id: str
     kind: str = 'llm'
 
+class ModelCompatibilityReq(BaseModel):
+    model_kind: str
+    model_path: Optional[str] = None
+    model_id: Optional[str] = None
+
 # ============================================================
 # Common helpers
 # ============================================================
@@ -249,6 +262,13 @@ def cuda_info():
         if torch.cuda.is_available():
             p = torch.cuda.get_device_properties(0)
             return "cuda", round(p.total_memory / 1024 ** 3, 2), torch.cuda.get_device_name(0)
+        if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+            return "mps", 0.0, "Apple Metal"
+        if hasattr(torch, "xpu") and torch.xpu.is_available():
+            try:
+                return "xpu", 0.0, torch.xpu.get_device_name(0)
+            except Exception:
+                return "xpu", 0.0, "Intel XPU"
     except Exception:
         pass
     return "cpu", 0.0, "CPU"
@@ -391,16 +411,26 @@ def load_model(model_id: str, raw_path: str, job: dict):
     from diffusers import DiffusionPipeline
 
     path = resolve_path(raw_path, model_id)
+    compatibility = build_compatibility_report(path, "image")
+    if not compatibility.get("can_load"):
+        detail = "; ".join(compatibility.get("reasons") or ["Модель несовместима с этим компьютером."])
+        raise RuntimeError("Проверка совместимости не пройдена: " + detail)
+
     device, vram, gpu_name = cuda_info()
-    if device == "cpu":
-        raise RuntimeError("CUDA is not available. Install a CUDA build of torch.")
-    torch.cuda.set_device(0)
-    try:
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
-    except Exception:
-        pass
-    dtype = torch.float16
+    if device == "cuda":
+        torch.cuda.set_device(0)
+        try:
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+        except Exception:
+            pass
+        dtype = torch.float16
+    elif device == "mps":
+        dtype = torch.float16
+    elif device == "xpu":
+        dtype = torch.bfloat16 if hasattr(torch, "bfloat16") else torch.float32
+    else:
+        dtype = torch.float32
     index = read_index(path)
     pipe_cls = DiffusionPipeline
     cls_name = str(index.get("_class_name", ""))
@@ -429,7 +459,8 @@ def load_model(model_id: str, raw_path: str, job: dict):
         explicit[name] = load_component(path, name, index, dtype)
     quant = None
     pipe = None
-    if vram < LOW_VRAM_GB and os.path.isdir(os.path.join(path, "transformer")):
+    planned_quant = (compatibility.get("profile") or {}).get("quantization")
+    if device == "cuda" and planned_quant == "4bit-nf4" and os.path.isdir(os.path.join(path, "transformer")):
         try:
             job["stage"] = "Quantizing transformer to 4-bit nf4"
             job["progress"] = 0.2
@@ -468,30 +499,37 @@ def load_model(model_id: str, raw_path: str, job: dict):
         pipe = _fp(pipe_cls, path, dtype=dtype, **explicit)
         quant = "fp16"
     job["progress"] = 0.88
-    if vram < LOW_VRAM_GB and quant == "fp16":
-        job["stage"] = "Enabling sequential CPU offload"
-        pipe.enable_sequential_cpu_offload()
-        strategy = "sequential_offload"
-    elif vram < LOW_VRAM_GB:
-        job["stage"] = "Enabling model CPU offload"
-        try:
-            pipe.enable_model_cpu_offload()
-            strategy = "model_offload"
-        except Exception:
+    if device == "cuda":
+        use_offload = bool((compatibility.get("profile") or {}).get("offload")) or vram < LOW_VRAM_GB
+        if use_offload and quant == "fp16":
+            job["stage"] = "Enabling sequential CPU offload"
             pipe.enable_sequential_cpu_offload()
             strategy = "sequential_offload"
+        elif use_offload:
+            job["stage"] = "Enabling model CPU offload"
+            try:
+                pipe.enable_model_cpu_offload()
+                strategy = "model_offload"
+            except Exception:
+                pipe.enable_sequential_cpu_offload()
+                strategy = "sequential_offload"
+        else:
+            pipe.to("cuda")
+            strategy = "full_gpu"
     else:
-        pipe.to("cuda")
-        strategy = "full_gpu"
+        job["stage"] = "Placing pipeline on " + device
+        pipe.to(device)
+        strategy = "cpu" if device == "cpu" else "full_" + device
     for fn in ("enable_vae_slicing", "enable_vae_tiling", "enable_attention_slicing"):
         try:
             getattr(pipe, fn)()
         except Exception:
             pass
-    torch.cuda.empty_cache()
+    if device == "cuda":
+        torch.cuda.empty_cache()
     with LOCK:
         STATE.update(loaded=True, model_id=model_id, pipe=pipe, error=None,
-                     strategy=strategy, quant=quant)
+                     device=device, strategy=strategy, quant=quant, compatibility=compatibility)
     job["progress"] = 1.0
     job["stage"] = f"Ready | {quant} | {strategy}"
 
@@ -506,7 +544,7 @@ def run_generate(req: GenReq, job: dict):
     if pipe is None:
         raise RuntimeError("Model is not loaded")
     seed = req.seed if req.seed >= 0 else int.from_bytes(os.urandom(4), "little") % (2 ** 31)
-    gen_device = "cpu" if strategy in ("sequential_offload", "model_offload") else "cuda"
+    gen_device = "cpu" if strategy in ("sequential_offload", "model_offload") else STATE.get("device", "cpu")
     generator = torch.Generator(device=gen_device).manual_seed(seed)
     total = max(1, req.steps)
 
@@ -568,7 +606,8 @@ def run_generate(req: GenReq, job: dict):
     }
     job["progress"] = 1.0
     job["stage"] = "Done"
-    torch.cuda.empty_cache()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 # ============================================================
 # LLM via transformers (same torch/CUDA stack as image gen)
@@ -584,52 +623,160 @@ def _extract_json(text: str):
     except Exception:
         return None
 
+def _select_llm_adapter(path: str, model_info: dict):
+    import transformers
+
+    adapter = model_info.get("adapter")
+    if adapter == "transformers_multimodal":
+        model_cls = getattr(transformers, "AutoModelForMultimodalLM", None)
+        if model_cls is None:
+            model_cls = getattr(transformers, "AutoModelForImageTextToText", None)
+        if model_cls is None:
+            raise RuntimeError(
+                "Текущая версия Transformers не поддерживает мультимодальный AutoModel. "
+                "Обновите Transformers и повторите проверку совместимости."
+            )
+        processor_cls = getattr(transformers, "AutoProcessor", None)
+        if processor_cls is None:
+            raise RuntimeError("В установленной Transformers отсутствует AutoProcessor.")
+        return model_cls, processor_cls, "transformers_multimodal"
+
+    if adapter == "transformers_seq2seq":
+        model_cls = getattr(transformers, "AutoModelForSeq2SeqLM", None)
+        if model_cls is None:
+            raise RuntimeError("В установленной Transformers отсутствует AutoModelForSeq2SeqLM.")
+        return model_cls, None, "transformers_seq2seq"
+
+    model_cls = getattr(transformers, "AutoModelForCausalLM", None)
+    if model_cls is None:
+        raise RuntimeError("В установленной Transformers отсутствует AutoModelForCausalLM.")
+    return model_cls, None, "transformers_causal_lm"
+
+
+def _llm_max_memory(compatibility: dict) -> Optional[dict]:
+    hardware = compatibility.get("hardware") or {}
+    memory = hardware.get("memory") or {}
+    max_memory = {}
+    for accelerator in hardware.get("accelerators") or []:
+        if accelerator.get("backend") == "cuda":
+            free = accelerator.get("free_vram_gb") or accelerator.get("total_vram_gb")
+            if free:
+                max_memory[int(accelerator.get("index", 0))] = f"{max(1, int(free * 0.78))}GiB"
+    ram = memory.get("ram_available_gb")
+    if ram:
+        max_memory["cpu"] = f"{max(2, int(ram * 0.65))}GiB"
+    return max_memory or None
+
+
 def load_llm(path: str):
     import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+    from transformers import AutoTokenizer
 
     if not os.path.isdir(path):
         raise FileNotFoundError(f"LLM folder not found: {path}")
-    tokenizer = AutoTokenizer.from_pretrained(path)
-    _, vram, _ = cuda_info()
-    gpu_budget = f"{max(2, int(vram) - 1)}GiB"
-    bnb4 = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4",
-                               bnb_4bit_compute_dtype=torch.float16, bnb_4bit_use_double_quant=True)
-    bnb8 = BitsAndBytesConfig(load_in_8bit=True)
-    attempts = [
-        ("cuda-4bit", dict(device_map="cuda", torch_dtype=torch.float16, quantization_config=bnb4)),
-        ("auto-4bit", dict(device_map="auto", torch_dtype=torch.float16, quantization_config=bnb4,
-                           max_memory={0: gpu_budget, "cpu": "24GiB"})),
-        ("auto-8bit", dict(device_map="auto", torch_dtype=torch.float16, quantization_config=bnb8,
-                           max_memory={0: gpu_budget, "cpu": "24GiB"})),
-        ("cpu-fp32", dict(device_map="cpu", torch_dtype=torch.float32)),
-    ]
-    last = None
-    for name, kw in attempts:
-        try:
-            model = AutoModelForCausalLM.from_pretrained(path, **kw)
-            model.eval()
-            with LOCK:
-                LLM_STATE.update(model=model, tokenizer=tokenizer, loaded=True,
-                                 path=path, device=name, error=None)
-            return True
-        except Exception as e:
-            last = f"{name}: {type(e).__name__}: {str(e)[:160]}"
-            try:
-                import torch as _t
-                _t.cuda.empty_cache()
-            except Exception:
-                pass
-    with LOCK:
-        LLM_STATE.update(error=last)
-    return False
 
-def _apply_template(tokenizer, messages, thinking):
+    compatibility = build_compatibility_report(path, "llm")
+    if not compatibility.get("can_load"):
+        detail = "; ".join(compatibility.get("reasons") or ["Модель несовместима с этим компьютером."])
+        with LOCK:
+            LLM_STATE.update(error=detail)
+        return False
+
+    model_info = compatibility.get("model") or {}
+    model_cls, processor_cls, adapter = _select_llm_adapter(path, model_info)
+    processor = None
+    tokenizer = None
+    if processor_cls is not None or model_info.get("processor_present"):
+        try:
+            from transformers import AutoProcessor
+            processor = AutoProcessor.from_pretrained(path)
+            tokenizer = getattr(processor, "tokenizer", None)
+        except Exception as exc:
+            if adapter == "transformers_multimodal":
+                raise RuntimeError(
+                    "Не удалось загрузить AutoProcessor мультимодальной модели: "
+                    + f"{type(exc).__name__}: {str(exc)[:300]}"
+                ) from exc
+    if tokenizer is None:
+        tokenizer = AutoTokenizer.from_pretrained(path)
+
+    profile = compatibility.get("profile") or {}
+    device = str(profile.get("device") or "cpu")
+    strategy = str(profile.get("strategy") or "cpu_fp32")
+    dtype_name = str(profile.get("dtype") or "float32")
+    if dtype_name == "bfloat16" and hasattr(torch, "bfloat16"):
+        dtype = torch.bfloat16
+    elif dtype_name == "float16":
+        dtype = torch.float16
+    else:
+        dtype = torch.float32
+
+    kwargs = {"torch_dtype": dtype, "low_cpu_mem_usage": bool(compatibility.get("hardware", {}).get("software", {}).get("accelerate", {}).get("available"))}
+    if device == "cuda":
+        if kwargs["low_cpu_mem_usage"]:
+            kwargs["device_map"] = "auto"
+            max_memory = _llm_max_memory(compatibility)
+            if max_memory:
+                kwargs["max_memory"] = max_memory
+        else:
+            kwargs["device_map"] = "cuda"
+    elif device in ("mps", "xpu"):
+        if kwargs["low_cpu_mem_usage"]:
+            kwargs["device_map"] = "auto"
+    elif kwargs["low_cpu_mem_usage"]:
+        kwargs["device_map"] = "cpu"
+
+    if profile.get("quantization") == "4bit-nf4":
+        try:
+            from transformers import BitsAndBytesConfig
+            kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=dtype,
+                bnb_4bit_use_double_quant=True,
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                "Диагностика выбрала 4-битный режим, но BitsAndBytes недоступен: "
+                + f"{type(exc).__name__}: {str(exc)[:240]}"
+            ) from exc
+
     try:
-        return tokenizer.apply_chat_template(messages, tokenize=False,
-                                             add_generation_prompt=True, enable_thinking=thinking)
+        try:
+            model = model_cls.from_pretrained(path, **kwargs)
+        except TypeError:
+            # Compatibility with Transformers releases that still expect torch_dtype
+            if "torch_dtype" in kwargs:
+                kwargs["dtype"] = kwargs.pop("torch_dtype")
+            model = model_cls.from_pretrained(path, **kwargs)
+        if device in ("cpu", "mps", "xpu") and "device_map" not in kwargs:
+            model = model.to(device)
+        model.eval()
+        with LOCK:
+            LLM_STATE.update(
+                model=model, tokenizer=tokenizer, processor=processor, loaded=True,
+                path=path, device=strategy, adapter=adapter, profile=profile,
+                error=None, compatibility=compatibility,
+            )
+        return True
+    except Exception as exc:
+        try:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
+        message = f"{type(exc).__name__}: {str(exc)[:500]}"
+        with LOCK:
+            LLM_STATE.update(error=message, loaded=False)
+        return False
+
+def _apply_template(template_source, messages, thinking):
+    try:
+        return template_source.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True, enable_thinking=thinking
+        )
     except TypeError:
-        return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        return template_source.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 
 def _llm_generate(messages, max_tokens, temperature, thinking=False, on_chunk=None, cancel_check=None):
     import torch
@@ -638,12 +785,28 @@ def _llm_generate(messages, max_tokens, temperature, thinking=False, on_chunk=No
     with LOCK:
         model = LLM_STATE["model"]
         tokenizer = LLM_STATE["tokenizer"]
+        processor = LLM_STATE.get("processor")
     if model is None:
         raise RuntimeError("LLM not loaded. Call /llm/load first.")
 
     clean = [{"role": m.get("role", "user"), "content": str(m.get("content", ""))} for m in messages]
-    prompt = _apply_template(tokenizer, clean, thinking)
-    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+    template_source = processor if processor is not None and hasattr(processor, "apply_chat_template") else tokenizer
+    prompt = _apply_template(template_source, clean, thinking)
+    if processor is not None:
+        try:
+            inputs = processor(text=prompt, return_tensors="pt")
+        except TypeError:
+            inputs = processor(prompt, return_tensors="pt")
+    else:
+        inputs = tokenizer(prompt, return_tensors="pt")
+
+    try:
+        input_device = model.get_input_embeddings().weight.device
+        if str(input_device) == "meta":
+            input_device = model.device
+    except Exception:
+        input_device = getattr(model, "device", "cpu")
+    inputs = inputs.to(input_device)
 
     gen_kw = dict(max_new_tokens=max_tokens, do_sample=temperature > 0,
                   pad_token_id=tokenizer.eos_token_id)
@@ -662,7 +825,8 @@ def _llm_generate(messages, max_tokens, temperature, thinking=False, on_chunk=No
         with LLM_LOCK, torch.no_grad():
             out = model.generate(**inputs, **gen_kw)
         new = out[0][inputs["input_ids"].shape[1]:]
-        return tokenizer.decode(new, skip_special_tokens=True).strip()
+        decoder = processor if processor is not None and hasattr(processor, "decode") else tokenizer
+        return decoder.decode(new, skip_special_tokens=True).strip()
 
     streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
     gen_kw["streamer"] = streamer
@@ -804,8 +968,8 @@ def worker():
                 elif kind in ("llm_chat", "llm_suggest"):
                     job["stage"] = "Generating"
                     job["progress"] = 0.5
-                    if not LLM_STATE["loaded"]:
-                        load_llm(LLM_PATH_DEFAULT)
+                    if not LLM_STATE["loaded"] and not load_llm(LLM_PATH_DEFAULT):
+                        raise RuntimeError(LLM_STATE.get("error") or "Не удалось загрузить локальную LLM.")
                     if kind == "llm_chat":
                         reply = _llm_generate(job["req"].messages, job["req"].max_tokens,
                                               job["req"].temperature, getattr(job["req"], "thinking", False),
@@ -868,8 +1032,36 @@ def health():
 def models_download(req: ModelDownloadReq):
     return {"job_id": enqueue("download", req)}
 
+@app.post("/models/compatibility")
+def models_compatibility(req: ModelCompatibilityReq):
+    if req.model_kind == "image":
+        try:
+            path = resolve_path(req.model_path or "", req.model_id or MODEL_ID_DEFAULT)
+        except Exception:
+            path = req.model_path or MODEL_PATH_DEFAULT
+    elif req.model_kind == "llm":
+        path = req.model_path or LLM_PATH_DEFAULT
+    else:
+        raise HTTPException(400, "model_kind должен быть llm или image")
+    return build_compatibility_report(path, req.model_kind)
+
+
+@app.get("/system/diagnostics")
+def system_diagnostics():
+    return get_hardware_report(SEARCH_DIRS[0] if SEARCH_DIRS else os.path.dirname(__file__))
+
+
 @app.post("/model/load")
 def model_load(req: LoadReq):
+    try:
+        path = resolve_path(req.model_path or "", req.model_id)
+        compatibility = build_compatibility_report(path, "image")
+        if not compatibility.get("can_load"):
+            raise HTTPException(422, detail={"message": "Модель несовместима с этим компьютером.", "report": compatibility})
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(404, detail=str(exc))
     return {"job_id": enqueue("load", req)}
 
 @app.post("/generate")
@@ -911,6 +1103,9 @@ def job_cancel(job_id: str):
 @app.post("/llm/load")
 def llm_load(req: Optional[LoadReq] = None):
     path = (req.model_path if req and req.model_path else LLM_PATH_DEFAULT)
+    compatibility = build_compatibility_report(path, "llm")
+    if not compatibility.get("can_load"):
+        raise HTTPException(422, detail={"message": "Модель несовместима с этим компьютером.", "report": compatibility})
     with LLM_LOCK:
         if LLM_STATE["loaded"] and LLM_STATE["path"] == path:
             return {"job_id": None, "ok": True, "message": "already loaded", "device": LLM_STATE["device"]}
@@ -934,7 +1129,7 @@ def llm_unload():
     import gc
     import torch
     with LLM_LOCK:
-        LLM_STATE.update(loaded=False, model=None, tokenizer=None)
+        LLM_STATE.update(loaded=False, model=None, tokenizer=None, processor=None, adapter=None, profile=None)
     gc.collect()
     try:
         torch.cuda.empty_cache()
