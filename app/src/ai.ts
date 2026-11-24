@@ -12,6 +12,7 @@ export interface AiSettings {
   llmProvider: 'local' | 'openai';
   openaiBaseUrl: string;
   openaiApiKey: string;
+  openaiProject: string;
   openaiModel: string;
   steps: number;
   guidance: number;
@@ -31,6 +32,7 @@ export const AI_DEFAULT: AiSettings = {
   llmProvider: 'local',
   openaiBaseUrl: 'https://api.deepseek.com',
   openaiApiKey: '',
+  openaiProject: '',
   openaiModel: 'deepseek-flash',
   steps: 8,
   guidance: 1.0,
@@ -192,7 +194,7 @@ export function normalizeOpenAiBase(url: string): string {
   return clean;
 }
 
-export interface OpenAiSettings { baseUrl: string; apiKey: string; model: string; }
+export interface OpenAiSettings { baseUrl: string; apiKey: string; model: string; projectId?: string; }
 
 async function openAiProxy<T>(endpoint: string, path: string, payload: unknown, signal?: AbortSignal): Promise<T> {
   const ctl = new AbortController();
@@ -211,14 +213,17 @@ async function openAiProxy<T>(endpoint: string, path: string, payload: unknown, 
   } finally { clearTimeout(timeout); signal?.removeEventListener('abort', abort); }
 }
 
-export async function openAiListModels(endpoint: string, settings: Pick<OpenAiSettings, 'baseUrl' | 'apiKey'>): Promise<{ data: { id: string }[] }> {
-  return openAiProxy(endpoint, '/openai/models', { base_url: normalizeOpenAiBase(settings.baseUrl), api_key: settings.apiKey });
+export async function openAiListModels(endpoint: string, settings: Pick<OpenAiSettings, 'baseUrl' | 'apiKey' | 'projectId'>): Promise<{ data: { id: string }[] }> {
+  return openAiProxy(endpoint, '/openai/models', {
+    base_url: normalizeOpenAiBase(settings.baseUrl), api_key: settings.apiKey, project_id: settings.projectId || '',
+  });
 }
 
 async function openAiChat(endpoint: string, settings: OpenAiSettings, messages: LlmMessage[], maxTokens: number, temperature: number, signal?: AbortSignal): Promise<string> {
   if (!settings.model.trim()) throw new Error('Укажите ID модели OpenAI API');
   const result = await openAiProxy<{ reply?: string }>(endpoint, '/openai/chat', {
-    base_url: normalizeOpenAiBase(settings.baseUrl), api_key: settings.apiKey, model: settings.model.trim(), messages, max_tokens: maxTokens, temperature,
+    base_url: normalizeOpenAiBase(settings.baseUrl), api_key: settings.apiKey, project_id: settings.projectId || '',
+    model: settings.model.trim(), messages, max_tokens: maxTokens, temperature,
   }, signal);
   if (!result.reply) throw new Error('OpenAI API вернул пустой ответ');
   return result.reply;

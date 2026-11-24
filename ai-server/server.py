@@ -239,6 +239,7 @@ class LlmSuggestReq(BaseModel):
 class OpenAiConnectionReq(BaseModel):
     base_url: str
     api_key: str = ''
+    project_id: str = ''
 
 class OpenAiChatReq(OpenAiConnectionReq):
     model: str
@@ -1362,13 +1363,17 @@ def models_list():
         embed.append({"id": os.path.basename(EMBED_PATH_DEFAULT), "path": EMBED_PATH_DEFAULT})
     return {"image": image, "llm": llm, "embed": embed}
 
-def _openai_request(base_url: str, api_key: str, path: str, payload: Optional[dict] = None):
+def _openai_request(base_url: str, api_key: str, path: str, payload: Optional[dict] = None, project_id: str = ''):
     base = base_url.strip().rstrip('/')
     if not base.startswith(('https://', 'http://')):
         raise HTTPException(400, 'Адрес OpenAI API должен начинаться с http:// или https://')
     headers = {'Accept': 'application/json'}
     if api_key.strip():
         headers['Authorization'] = 'Bearer ' + api_key.strip()
+    # The OpenAI SDK's project= parameter is sent as OpenAI-Project.
+    # Yandex AI Studio uses it to scope requests to the target folder.
+    if project_id.strip():
+        headers['OpenAI-Project'] = project_id.strip()
     data = None
     method = 'GET'
     if payload is not None:
@@ -1397,7 +1402,7 @@ def llm_health():
 
 @app.post("/openai/models")
 def openai_models(req: OpenAiConnectionReq):
-    return _openai_request(req.base_url, req.api_key, '/models')
+    return _openai_request(req.base_url, req.api_key, '/models', project_id=req.project_id)
 
 @app.post("/openai/chat")
 def openai_chat(req: OpenAiChatReq):
@@ -1407,7 +1412,7 @@ def openai_chat(req: OpenAiChatReq):
         'max_tokens': req.max_tokens,
         'temperature': req.temperature,
     }
-    result = _openai_request(req.base_url, req.api_key, '/chat/completions', payload)
+    result = _openai_request(req.base_url, req.api_key, '/chat/completions', payload, project_id=req.project_id)
     try:
         content = result['choices'][0]['message']['content']
         if isinstance(content, list):
