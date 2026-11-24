@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 import compatibility as compatibility_module
@@ -139,7 +140,7 @@ class CompatibilityTests(unittest.TestCase):
                 "total_vram_gb": 12, "free_vram_gb": 12, "bf16": True,
             }]
             hardware["software"]["bitsandbytes"] = {"available": True, "version": "test"}
-            with unittest.mock.patch.object(compatibility_module, "_measure_model", return_value={
+            with mock.patch.object(compatibility_module, "_measure_model", return_value={
                 "size_bytes": 28 * 1024 ** 3, "weight_bytes": 28 * 1024 ** 3,
                 "size_gb": 28, "weight_gb": 28, "weight_files": 1,
                 "gguf_files": 0, "onnx_files": 0,
