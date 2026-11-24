@@ -20,7 +20,7 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
   const [progress, setProgress] = useState(0);
   const [stage, setStage] = useState('');
   const [message, setMessage] = useState('');
-  const [health, setHealth] = useState<{ ok: boolean; device?: string; model_loaded?: boolean; error?: string }>({ ok: false });
+  const [health, setHealth] = useState<{ ok: boolean; device?: string; model_loaded?: boolean; model_id?: string; path?: string | null; error?: string }>({ ok: false });
   const [result, setResult] = useState<{ url: string; blob: Blob; source: 'ai' | 'procedural'; seed: number } | null>(null);
   const [usedSeed, setUsedSeed] = useState<number>(0);
   const [quantizationOpen, setQuantizationOpen] = useState(false);
@@ -112,8 +112,13 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
       if (!aliveRef.current) return;
       setHealth(h);
       if (!h.ok) throw new Error(`Локальный сервер не запущен (${cfg.endpoint}). Поднимите ai-server/server.py или нажмите «Локальный рендер».`);
-      if (!h.model_loaded) {
-        if (!cfg.autoLoad) throw new Error('Автозагрузка отключена. Сначала загрузите модель вручную.');
+      const loadedPath = (h.path || '').replace(/\\\\/g, '/').toLowerCase();
+      const selectedPath = (cfg.modelPath || '').replace(/\\\\/g, '/').toLowerCase();
+      const sameModel = !!h.model_loaded
+        && (!h.model_id || h.model_id === cfg.modelId)
+        && (!selectedPath || !loadedPath || loadedPath === selectedPath);
+      if (!sameModel) {
+        if (!cfg.autoLoad) throw new Error('Автозагрузка отключена. Сначала загрузите выбранную модель вручную.');
         if (!quantization) {
           setPendingLoadAction({ kind: 'generate', seed });
           setQuantizationOpen(true);
@@ -126,6 +131,7 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
       const useSeed = seed ?? (cfg.seed < 0 ? Math.floor(Math.random() * 2 ** 31) : cfg.seed);
       const final = await runJob('/generate', {
         model_id: cfg.modelId,
+        model_path: cfg.modelPath,
         prompt,
         negative_prompt: cfg.negative,
         width: cfg.width,
