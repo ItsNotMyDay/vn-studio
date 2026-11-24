@@ -303,6 +303,47 @@ export async function aiListModels(endpoint: string): Promise<{
   return jsonFetch(`${endpoint.replace(/\/+$/, '')}/models/list`, undefined, 8000);
 }
 
+export type LocalModelKind = 'llm' | 'image';
+
+export interface ModelCompatibilityReport {
+  status: 'ready' | 'warning' | 'unsupported' | 'blocked' | 'unknown';
+  can_load: boolean;
+  kind: LocalModelKind;
+  model: any;
+  hardware: any;
+  profile: {
+    device: string;
+    dtype: string;
+    quantization: string;
+    strategy?: string;
+    device_map: string;
+    offload: boolean;
+    estimated_vram_gb?: number | null;
+    estimated_ram_gb?: number | null;
+  };
+  reasons: string[];
+  warnings: string[];
+  limitations: string[];
+  requires_smoke_test: boolean;
+}
+
+export async function aiSystemDiagnostics(endpoint: string): Promise<any> {
+  return jsonFetch(`${endpoint.replace(/\/+$/, '')}/system/diagnostics`, undefined, 12000);
+}
+
+export async function aiModelCompatibility(
+  endpoint: string,
+  kind: LocalModelKind,
+  modelPath?: string | null,
+  modelId?: string,
+): Promise<ModelCompatibilityReport> {
+  return jsonFetch(`${endpoint.replace(/\/+$/, '')}/models/compatibility`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model_kind: kind, model_path: modelPath || null, model_id: modelId || null }),
+  }, 30000);
+}
+
 export async function aiDownloadHfModel(
   endpoint: string, repoId: string, kind: 'llm' | 'image',
   onProgress?: (p: number, stage: string) => void, signal?: AbortSignal,
