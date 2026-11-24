@@ -48,10 +48,10 @@ function runtime(G: any) {
   const chars = () => P.characters;
   const charById = (id: string) => chars().find((c: any) => c.id === id);
   const node = (id: string) => scene.nodes.find((n: any) => n.id === id);
-  function characterAlias(c: any) { return c && (c.isNarrator || c.id === 'global') ? 'GLOBAL' : String(c?.name || '').trim().toLocaleUpperCase().replace(/[^\\p{L}\\p{N}_-]+/gu, '_').replace(/^_+|_+$/g, ''); }
+  function characterAlias(c: any) { return c && (c.isNarrator || c.id === 'global') ? 'GLOBAL' : String(c?.name || '').trim().toLocaleUpperCase().replace(/[^\p{L}\p{N}_-]+/gu, '_').replace(/^_+|_+$/g, ''); }
   function resolveTextVariables(source: any) {
     const aliases = new Map(chars().map((c: any) => [characterAlias(c), c]));
-    return String(source ?? '').replace(/@([\\p{L}\\p{N}_-]+)\\.([\\p{L}\\p{N}_-]+)/gu, (token, alias, key) => {
+    return String(source ?? '').replace(/@([\p{L}\p{N}_-]+)\.([\p{L}\p{N}_-]+)/gu, (token, alias, key) => {
       const character: any = aliases.get(String(alias).toLocaleUpperCase());
       if (!character) return token;
       const variable = (character.vars || []).find((v: any) => String(v.key).toLocaleUpperCase() === String(key).toLocaleUpperCase());
