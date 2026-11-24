@@ -1065,26 +1065,26 @@ def _suggest_impl(req: LlmSuggestReq, cancel_check=None):
               "Отвечай ТОЛЬКО валидным JSON без пояснений.")
 
     user = (
-        f"Сцена: {ctx.get('chapter_title', '?')}\\n"
-        f"История событий до этого момента:\\n{history_txt}\\n"
-        f"Говорит: {current_node.get('character_name', '?')}\\n"
-        f"Характер: {current_node.get('character_personality', 'не указан')}\\n"
-        f"Внешность: {current_node.get('character_appearance', 'не указана')}\\n"
-        f"ЦЕЛЕВОЕ НАСТРОЕНИЕ КАЖДОЙ РЕПЛИКИ: {emotion_label} (expression={emotion}).\\n"
-        f"Как его передать: {emotion_guidance}.\\n"
-        f"Отношения (переменные): {current_node.get('character_vars', {})}\\n"
+        f"Сцена: {ctx.get('chapter_title', '?')}\n"
+        f"История событий до этого момента:\n{history_txt}\n"
+        f"Говорит: {current_node.get('character_name', '?')}\n"
+        f"Характер: {current_node.get('character_personality', 'не указан')}\n"
+        f"Внешность: {current_node.get('character_appearance', 'не указана')}\n"
+        f"ЦЕЛЕВОЕ НАСТРОЕНИЕ КАЖДОЙ РЕПЛИКИ: {emotion_label} (expression={emotion}).\n"
+        f"Как его передать: {emotion_guidance}.\n"
+        f"Отношения (переменные): {current_node.get('character_vars', {})}\n"
     )
     if others_txt:
-        user += f"Другие персонажи в сцене:\\n{others_txt}\\n"
+        user += f"Другие персонажи в сцене:\n{others_txt}\n"
     if atm_txt:
-        user += f"Атмосфера: {atm_txt}\\n"
+        user += f"Атмосфера: {atm_txt}\n"
     if rag_txt:
-        user += rag_txt + "\\n"
+        user += rag_txt + "\n"
     user += (
         f"Предложи ровно {n} варианта следующей реплики ЭТОГО персонажа. "
         "ВСЕ варианты обязаны сохранять заданное настроение. Различай их только формулировкой, ритмом и речевым приёмом внутри этой эмоции. "
         "Не предлагай альтернативные эмоции: например, не делай один вариант весёлым, а другой грустным или злым. "
-        "Поле tone может описывать только стиль внутри заданного настроения. Учитывай характер и контекст.\\n"
+        "Поле tone может описывать только стиль внутри заданного настроения. Учитывай характер и контекст.\n"
         '{"suggestions": [{"text": "...", "tone": "..."}]}'
     )
 
