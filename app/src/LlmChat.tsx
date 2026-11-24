@@ -14,7 +14,7 @@ function modelName(path?: string | null) {
   const parts = path.replace(/\\/g, '/').split('/').filter(Boolean);
   return parts[parts.length - 1] || path;
 }
-interface LlmStatus { online: boolean; loaded: boolean; path?: string | null; device?: string | null; error?: string | null; }
+interface LlmStatus { online: boolean; loaded: boolean; path?: string | null; device?: string | null; quantization?: string | null; error?: string | null; }
 
 const BASE_SYSTEM =
   'Ты - консультант-сценарист визуальных новелл и оператор редактора нод. Отвечай на русском, кратко и по делу. ' +
@@ -96,7 +96,7 @@ export function LlmChat() {
         });
       } else {
         const [server, h] = await Promise.all([aiHealth(endpoint), llmHealth(endpoint)]);
-        if (alive.current) setStatus({ online: !!server.ok, loaded: !!h.loaded, path: h.path, device: h.device, error: server.ok ? h.error : server.error });
+        if (alive.current) setStatus({ online: !!server.ok, loaded: !!h.loaded, path: h.path, device: h.device, quantization: h.quantization, error: server.ok ? h.error : server.error });
       }
     } catch (error: any) {
       if (alive.current) setStatus({ online: false, loaded: false, error: error?.message ?? 'нет соединения' });
@@ -122,7 +122,7 @@ export function LlmChat() {
     setLoadProg({ p: 0, stage: 'Старт…' });
     try {
       const r = await llmLoadJob(endpoint, aiCfg.llmPath || null, quantization, (p, stage) => setLoadProg({ p, stage }));
-      if (r.ok) { setStatus(st => ({ ...st, loaded: true, error: null })); s.toast('LLM загружена и готова'); }
+      if (r.ok) { const h = await llmHealth(endpoint); setStatus(st => ({ ...st, loaded: true, path: h.path, device: h.device, quantization: h.quantization, error: null })); s.toast('LLM загружена и готова'); }
       else s.toast(`Ошибка загрузки LLM: ${r.error ?? 'неизвестно'}`);
     } catch (e: any) { s.toast(`Ошибка: ${e?.message ?? e}`); }
     finally { setLoadingModel(false); setLoadProg({ p: 0, stage: '' }); }
