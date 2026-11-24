@@ -405,7 +405,8 @@ def build_compatibility_report(
     warnings: list[str] = []
     software = _installed_software(hardware)
     accelerators = hardware.get("accelerators") or []
-    cuda = next((a for a in accelerators if a.get("backend") == "cuda"), None)
+    cuda_devices = [a for a in accelerators if a.get("backend") == "cuda"]
+    cuda = cuda_devices[0] if cuda_devices else None
     other_accelerator = next((a for a in accelerators if a.get("backend") in ("mps", "xpu")), None)
     ram_total = ((hardware.get("memory") or {}).get("ram_total_gb") or 0) * (1024 ** 3)
     ram_free = ((hardware.get("memory") or {}).get("ram_available_gb") or 0) * (1024 ** 3)
@@ -467,17 +468,20 @@ def build_compatibility_report(
                 status = "unsupported"
                 reasons.append("Формат GGUF распознан, но backend llama.cpp пока не подключён.")
             elif cuda:
-                free_vram = int(cuda.get("free_vram_bytes") or 0)
-                total_vram = int(cuda.get("total_vram_bytes") or 0)
-                available_vram = free_vram if cuda.get("free_vram_bytes") is not None else total_vram
+                available_vram = sum(
+                    int(device.get("free_vram_bytes")
+                        if device.get("free_vram_bytes") is not None
+                        else device.get("total_vram_bytes") or 0)
+                    for device in cuda_devices
+                )
                 safe_vram = int(available_vram * 0.82)
-                dtype = "bfloat16" if cuda.get("bf16") else "float16"
+                dtype = "bfloat16" if all(device.get("bf16") for device in cuda_devices) else "float16"
                 profile.update(device="cuda", dtype=dtype, device_map="auto")
                 if model.get("quantized"):
                     profile["quantization"] = "pre-quantized"
                     profile["estimated_vram_gb"] = _gb(int(weight_bytes * 1.25 + 1.5 * (1024 ** 3)))
                 if int(profile["estimated_vram_gb"] * (1024 ** 3)) <= safe_vram:
-                    profile["strategy"] = "single_gpu"
+                    profile["strategy"] = "multi_gpu_auto" if len(cuda_devices) > 1 else "single_gpu"
                     if not software.get("accelerate"):
                         if ram_free >= estimated_cpu_bytes * 1.25:
                             status = "warning"
