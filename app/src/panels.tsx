@@ -700,7 +700,7 @@ export function Inspector() {
       const { llmSuggest } = await import('./ai');
       const aiCfg = loadAiSettings();
       const remote = aiCfg.llmProvider === 'openai'
-        ? { baseUrl: aiCfg.openaiBaseUrl, apiKey: aiCfg.openaiApiKey, model: aiCfg.openaiModel }
+        ? { baseUrl: aiCfg.openaiBaseUrl, apiKey: aiCfg.openaiApiKey, projectId: aiCfg.openaiProject, model: aiCfg.openaiModel }
         : undefined;
       const res = await llmSuggest(s.director.aiEndpoint ?? 'http://127.0.0.1:8765', ctx, count, 512, 0.85,
         id => { suggestJob.current = id; }, ctl.signal, remote);
@@ -1282,6 +1282,7 @@ function AiModelsPanel() {
   const [downloadProg, setDownloadProg] = useState<{ on: boolean; p: number; stage: string }>({ on: false, p: 0, stage: '' });
   const [apiBase, setApiBase] = useState(cfg.openaiBaseUrl);
   const [apiKey, setApiKey] = useState(cfg.openaiApiKey);
+  const [apiProject, setApiProject] = useState(cfg.openaiProject || '');
   const [apiModel, setApiModel] = useState(cfg.openaiModel);
   const [apiChecking, setApiChecking] = useState(false);
   const [remoteOk, setRemoteOk] = useState<boolean | null>(null);
@@ -1314,9 +1315,10 @@ function AiModelsPanel() {
     let alive = true;
     const tick = async () => {
       try {
-        const models = await openAiListModels(ep, { baseUrl: cfg.openaiBaseUrl, apiKey: cfg.openaiApiKey });
+        const models = await openAiListModels(ep, { baseUrl: cfg.openaiBaseUrl, apiKey: cfg.openaiApiKey, projectId: cfg.openaiProject });
         const ids = (models.data ?? []).map(item => item.id);
-        const valid = !cfg.openaiModel || !ids.length || ids.includes(cfg.openaiModel);
+        const isYandex = cfg.openaiBaseUrl.includes('ai.api.cloud.yandex.net');
+        const valid = !cfg.openaiModel || !ids.length || ids.includes(cfg.openaiModel) || isYandex;
         if (alive) setRemoteOk(valid);
       } catch {
         if (alive) setRemoteOk(false);
@@ -1324,7 +1326,7 @@ function AiModelsPanel() {
     };
     tick();
     return () => { alive = false; };
-  }, [ep, cfg.llmProvider, cfg.openaiBaseUrl, cfg.openaiApiKey, cfg.openaiModel]);
+  }, [ep, cfg.llmProvider, cfg.openaiBaseUrl, cfg.openaiApiKey, cfg.openaiProject, cfg.openaiModel]);
 
   const patch = (p: Partial<AiSettings>) => setCfg(saveAiSettings(p));
 
@@ -1350,6 +1352,7 @@ function AiModelsPanel() {
     setHfKind(kind);
     setApiBase(cfg.openaiBaseUrl);
     setApiKey(cfg.openaiApiKey);
+    setApiProject(cfg.openaiProject || '');
     setApiModel(cfg.openaiModel);
     setAddMode('choice');
   };
@@ -1406,17 +1409,30 @@ function AiModelsPanel() {
     setApiChecking(true);
     try {
       const normalized = normalizeOpenAiBase(apiBase);
-      const models = await openAiListModels(ep, { baseUrl: normalized, apiKey: apiKey.trim() });
+      const isYandex = new URL(normalized).hostname === 'ai.api.cloud.yandex.net';
+      let projectId = apiProject.trim();
+      let selected = apiModel.trim();
+      const modelUri = /^gpt:\/\/([^/]+)\/(.+)$/.exec(selected);
+      if (isYandex) {
+        if (!projectId && modelUri) projectId = modelUri[1];
+        if (!projectId) throw new Error('Для Yandex AI Studio укажите ID каталога (Folder ID).');
+        if (modelUri && modelUri[1] !== projectId) {
+          throw new Error('ID каталога в модели gpt:// не совпадает с указанным Folder ID.');
+        }
+        if (selected && !modelUri) selected = 'gpt://' + projectId + '/' + selected.replace(/^\/+/, '');
+      }
+      const models = await openAiListModels(ep, { baseUrl: normalized, apiKey: apiKey.trim(), projectId });
       const ids = (models.data ?? []).map(item => item.id).filter(Boolean);
-      const selected = apiModel.trim() || ids[0] || '';
+      if (!selected) selected = ids[0] || '';
       if (!selected) throw new Error('Сервер ответил, но не вернул список моделей. Введите ID модели вручную.');
-      if (ids.length && !ids.includes(selected)) {
+      if (ids.length && !ids.includes(selected) && !isYandex) {
         throw new Error('Модель ' + selected + ' не найдена в /models. Проверьте её ID.');
       }
       patch({
         llmProvider: 'openai',
         openaiBaseUrl: normalized,
         openaiApiKey: apiKey.trim(),
+        openaiProject: projectId,
         openaiModel: selected,
       });
       setRemoteOk(true);
@@ -1433,7 +1449,7 @@ function AiModelsPanel() {
   const checkOpenAi = async () => {
     setApiChecking(true);
     try {
-      const models = await openAiListModels(ep, { baseUrl: cfg.openaiBaseUrl, apiKey: cfg.openaiApiKey });
+      const models = await openAiListModels(ep, { baseUrl: cfg.openaiBaseUrl, apiKey: cfg.openaiApiKey, projectId: cfg.openaiProject });
       setRemoteOk(true);
       s.toast('Соединение с API установлено. Моделей: ' + (models.data?.length ?? 0));
     } catch (error: any) {
@@ -1751,9 +1767,11 @@ function AiModelsPanel() {
               <input className="input" value={apiBase} onChange={e => setApiBase(e.target.value)} placeholder="https://api.deepseek.com" />
               <label className="block text-[11px] text-mute">API ключ</label>
               <input className="input" type="password" autoComplete="new-password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="API-ключ DeepSeek" />
+              <label className="block text-[11px] text-mute">ID каталога / Folder ID (для Yandex Cloud)</label>
+              <input className="input" value={apiProject} onChange={e => setApiProject(e.target.value)} placeholder="b1g... (необязательно для DeepSeek)" />
               <label className="block text-[11px] text-mute">ID модели</label>
-              <input className="input" value={apiModel} onChange={e => setApiModel(e.target.value)} placeholder="deepseek-flash" />
-              <div className="text-[10px] text-mute">API-ключ сохраняется в настройках приложения на этом ПК и передаётся выбранному OpenAI-совместимому провайдеру через AI-сервер.</div>
+              <input className="input" value={apiModel} onChange={e => setApiModel(e.target.value)} placeholder="deepseek-flash или yandexgpt-5.1/latest" />
+              <div className="text-[10px] text-mute">Для Yandex AI Studio: https://ai.api.cloud.yandex.net/v1, укажите Folder ID и модель (например yandexgpt-5.1/latest). Приложение само сформирует gpt://FolderID/model. Нужны scope yc.ai.languageModels.execute и роль ai.languageModels.user. API-ключ хранится в настройках на этом ПК и передаётся через AI-сервер.</div>
               <div className="flex gap-2">
                 <button className="btn btn-primary flex-1 justify-center" disabled={apiChecking} onClick={connectOpenAi}>
                   {apiChecking ? <Loader2 size={12} className="animate-spin" /> : <Server size={12} />} Проверить и подключить
