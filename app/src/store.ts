@@ -620,7 +620,7 @@ export const useStore = create<Store>((set, get) => {
   };
 
   const entityKey = (kind: EntityKind, refId: string) => `${kind === 'character' ? 'char' : 'sprite'}:${refId}`;
-  const entityRefId = (d: any, nodeId: string) => d.entityKind !== 'sprite' ? d.characterId : (d.entityId || (['text', 'geometry'].includes(d.spriteType) ? `object_${nodeId}` : d.spriteId));
+  const entityRefId = (d: any, nodeId: string) => d.entityKind !== 'sprite' ? d.characterId : ['text', 'geometry'].includes(d.spriteType) ? (d.entityId || `object_${nodeId}`) : d.spriteId;
   const markFx = (ms: number) => { lastFxUntil = Math.max(lastFxUntil, Date.now() + ms); };
 
   const scheduleHide = (nodeId: string, key: string, ms: number) => {
