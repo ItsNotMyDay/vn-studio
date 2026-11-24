@@ -406,18 +406,37 @@ def check_alpha_support(path):
         pass
     return False
 
+def _compatibility_profile_is_reliable(report: dict) -> bool:
+    status = report.get("diagnostic_status", report.get("status"))
+    return status not in ("blocked", "unsupported", "unknown")
+
+
+def _compatibility_warnings(report: dict) -> list[str]:
+    warnings = [str(item) for item in (report.get("warnings") or []) if item]
+    status = report.get("diagnostic_status", report.get("status"))
+    if status in ("blocked", "unsupported", "unknown"):
+        warnings.insert(
+            0,
+            "Предварительная проверка выявила ограничения, но загрузка не запрещена. Выполняется пробная загрузка.",
+        )
+        warnings.extend(str(item) for item in (report.get("reasons") or []) if item)
+    return list(dict.fromkeys(warnings))
+
+
 def load_model(model_id: str, raw_path: str, job: dict):
     import torch
     from diffusers import DiffusionPipeline
 
     path = resolve_path(raw_path, model_id)
     compatibility = build_compatibility_report(path, "image")
-    if not compatibility.get("can_load"):
-        detail = "; ".join(compatibility.get("reasons") or ["Модель несовместима с этим компьютером."])
-        raise RuntimeError("Проверка совместимости не пройдена: " + detail)
+    profile_is_reliable = _compatibility_profile_is_reliable(compatibility)
+    job["warnings"] = _compatibility_warnings(compatibility)
+    if job["warnings"]:
+        job["stage"] = "⚠️ Предупреждение диагностики; пробуем загрузить модель"
 
     device, vram, gpu_name = cuda_info()
-    planned_device = (compatibility.get("profile") or {}).get("device")
+    profile = compatibility.get("profile") or {}
+    planned_device = profile.get("device") if profile_is_reliable else None
     if planned_device == "cpu" and device != "cpu":
         gpu_name = f"CPU fallback (GPU detected: {gpu_name})"
         device, vram = "cpu", 0.0
@@ -463,7 +482,7 @@ def load_model(model_id: str, raw_path: str, job: dict):
         explicit[name] = load_component(path, name, index, dtype)
     quant = None
     pipe = None
-    planned_quant = (compatibility.get("profile") or {}).get("quantization")
+    planned_quant = profile.get("quantization") if profile_is_reliable else None
     if device == "cuda" and planned_quant == "4bit-nf4":
         if not os.path.isdir(os.path.join(path, "transformer")):
             raise RuntimeError("Диагностика выбрала 4-битный режим, но в Diffusers-модели нет компонента transformer. Автоматический запуск отменён.")
@@ -509,7 +528,18 @@ def load_model(model_id: str, raw_path: str, job: dict):
         quant = "fp16" if dtype == torch.float16 else str(dtype).replace("torch.", "")
     job["progress"] = 0.88
     if device == "cuda":
-        use_offload = bool((compatibility.get("profile") or {}).get("offload")) or vram < LOW_VRAM_GB
+        model_weight_bytes = int(((compatibility.get("model") or {}).get("weight_bytes") or 0))
+        estimated_memory_pressure = (
+            not profile_is_reliable
+            and model_weight_bytes > 0
+            and vram > 0
+            and model_weight_bytes > int(vram * (1024 ** 3) * 0.78)
+        )
+        use_offload = (
+            (profile_is_reliable and bool(profile.get("offload")))
+            or vram < LOW_VRAM_GB
+            or estimated_memory_pressure
+        )
         if use_offload and quant == "fp16":
             job["stage"] = "Enabling sequential CPU offload"
             pipe.enable_sequential_cpu_offload()
@@ -690,12 +720,7 @@ def load_llm(path: str):
         raise FileNotFoundError(f"LLM folder not found: {path}")
 
     compatibility = build_compatibility_report(path, "llm")
-    if not compatibility.get("can_load"):
-        detail = "; ".join(compatibility.get("reasons") or ["Модель несовместима с этим компьютером."])
-        with LOCK:
-            LLM_STATE.update(error=detail)
-        return False
-
+    profile_is_reliable = _compatibility_profile_is_reliable(compatibility)
     model_info = compatibility.get("model") or {}
     model_cls, processor_cls, adapter = _select_llm_adapter(path, model_info)
     processor = None
@@ -714,10 +739,35 @@ def load_llm(path: str):
     if tokenizer is None:
         tokenizer = AutoTokenizer.from_pretrained(path)
 
-    profile = compatibility.get("profile") or {}
-    device = str(profile.get("device") or "cpu")
-    strategy = str(profile.get("strategy") or "cpu_fp32")
-    dtype_name = str(profile.get("dtype") or "float32")
+    profile = dict(compatibility.get("profile") or {})
+    if not profile_is_reliable:
+        # Ignore a pessimistic CPU-only default from a failed estimate. Attempt
+        # the runtime's native accelerator path first; actual allocation errors
+        # are reported by from_pretrained rather than guessed in advance.
+        device, _, _ = cuda_info()
+        if device == "cuda":
+            try:
+                dtype_name = "bfloat16" if torch.cuda.is_bf16_supported() else "float16"
+            except Exception:
+                dtype_name = "float16"
+        elif device == "mps":
+            dtype_name = "float16"
+        elif device == "xpu":
+            dtype_name = "bfloat16" if hasattr(torch, "bfloat16") else "float32"
+        else:
+            dtype_name = "float32"
+        strategy = "best_effort_" + device
+        profile.update(
+            device=device,
+            dtype=dtype_name,
+            strategy=strategy,
+            quantization="none",
+            offload=False,
+        )
+    else:
+        device = str(profile.get("device") or "cpu")
+        strategy = str(profile.get("strategy") or "cpu_fp32")
+        dtype_name = str(profile.get("dtype") or "float32")
     if dtype_name == "bfloat16" and hasattr(torch, "bfloat16"):
         dtype = torch.bfloat16
     elif dtype_name == "float16":
@@ -730,7 +780,7 @@ def load_llm(path: str):
         if kwargs["low_cpu_mem_usage"]:
             kwargs["device_map"] = "auto"
             max_memory = _llm_max_memory(compatibility)
-            if max_memory:
+            if max_memory and profile_is_reliable:
                 kwargs["max_memory"] = max_memory
     elif device in ("mps", "xpu"):
         # Load in host RAM and transfer explicitly; auto device maps are not
@@ -999,8 +1049,11 @@ def worker():
                 elif kind in ("llm_chat", "llm_suggest"):
                     job["stage"] = "Generating"
                     job["progress"] = 0.5
-                    if not LLM_STATE["loaded"] and not load_llm(LLM_PATH_DEFAULT):
-                        raise RuntimeError(LLM_STATE.get("error") or "Не удалось загрузить локальную LLM.")
+                    if not LLM_STATE["loaded"]:
+                        compatibility = build_compatibility_report(LLM_PATH_DEFAULT, "llm")
+                        job["warnings"] = _compatibility_warnings(compatibility)
+                        if not load_llm(LLM_PATH_DEFAULT):
+                            raise RuntimeError(LLM_STATE.get("error") or "Не удалось загрузить локальную LLM.")
                     if kind == "llm_chat":
                         reply = _llm_generate(job["req"].messages, job["req"].max_tokens,
                                               job["req"].temperature, getattr(job["req"], "thinking", False),
@@ -1029,11 +1082,12 @@ def worker():
 
 threading.Thread(target=worker, daemon=True).start()
 
-def enqueue(kind, req) -> str:
+def enqueue(kind, req, warnings: Optional[list[str]] = None) -> str:
     jid = uuid.uuid4().hex[:12]
     with LOCK:
         JOBS[jid] = {"kind": kind, "req": req, "state": "queued", "progress": 0.0,
-                     "stage": "Queued", "cancel": False, "partial": ""}
+                     "stage": "Queued", "cancel": False, "partial": "",
+                     "warnings": list(warnings or [])}
         QUEUE.append(jid)
     WAKE.set()
     return jid
@@ -1087,13 +1141,11 @@ def model_load(req: LoadReq):
     try:
         path = resolve_path(req.model_path or "", req.model_id)
         compatibility = build_compatibility_report(path, "image")
-        if not compatibility.get("can_load"):
-            raise HTTPException(422, detail={"message": "Модель несовместима с этим компьютером.", "report": compatibility})
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(404, detail=str(exc))
-    return {"job_id": enqueue("load", req)}
+    return {"job_id": enqueue("load", req, _compatibility_warnings(compatibility))}
 
 @app.post("/generate")
 def generate(req: GenReq):
@@ -1116,7 +1168,7 @@ def job_status(job_id: str):
         job = JOBS.get(job_id)
     if not job:
         raise HTTPException(404, "job not found")
-    return {k: job.get(k) for k in ("state", "progress", "stage", "message", "result", "partial")}
+    return {k: job.get(k) for k in ("state", "progress", "stage", "message", "result", "partial", "warnings")}
 
 @app.post("/jobs/{job_id}/cancel")
 def job_cancel(job_id: str):
@@ -1134,13 +1186,13 @@ def job_cancel(job_id: str):
 @app.post("/llm/load")
 def llm_load(req: Optional[LoadReq] = None):
     path = (req.model_path if req and req.model_path else LLM_PATH_DEFAULT)
+    if not os.path.isdir(path):
+        raise HTTPException(404, detail=f"LLM folder not found: {path}")
     compatibility = build_compatibility_report(path, "llm")
-    if not compatibility.get("can_load"):
-        raise HTTPException(422, detail={"message": "Модель несовместима с этим компьютером.", "report": compatibility})
     with LLM_LOCK:
         if LLM_STATE["loaded"] and LLM_STATE["path"] == path:
             return {"job_id": None, "ok": True, "message": "already loaded", "device": LLM_STATE["device"]}
-    return {"job_id": enqueue("llm_load", LoadReq(model_path=path))}
+    return {"job_id": enqueue("llm_load", LoadReq(model_path=path), _compatibility_warnings(compatibility))}
 
 @app.post("/model/unload")
 def model_unload():
