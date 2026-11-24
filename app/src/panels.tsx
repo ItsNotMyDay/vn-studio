@@ -11,6 +11,7 @@ import {
   useStore, KIND_META, VAR_TYPES, VAR_OPS, COND_OPS, ENTITY_EFFECTS,
   type NodeKind, type Character, type VarType, type SpriteAsset, MOVE_EFFECTS
 } from './store';
+import { characterVariableAlias, getVariableAutocomplete, type VariableAutocomplete } from './textVariables';
 import { BG_SWATCH } from './nodes';
 import { audioEnsure, audioPad, audioFile } from './audio';
 import { useAssetURL, getAssetURL } from './assets';
@@ -327,10 +328,7 @@ export function Sidebar() {
           >
             <span className="w-3 h-3 rounded-full shrink-0" style={{ background: c.color, boxShadow: `0 0 8px ${c.color}88` }} />
             <span className="flex-1 truncate text-[12.5px]">{c.name}</span>
-            <span className="text-[10px] text-mute">{Object.keys(c.sprites ?? {}).length} спр.</span>
-            <button className="opacity-0 group-hover:opacity-100 text-mute hover:text-danger" title="Удалить персонажа" onClick={e => { e.stopPropagation(); s.deleteCharacter(c.id); }}>
-              <Trash2 size={12} />
-            </button>
+            {c.isNarrator ? <span className="chip !py-0 !px-1.5 !text-[9px]">GLOBAL</span> : <><span className="text-[10px] text-mute">{Object.keys(c.sprites ?? {}).length} спр.</span><button className="opacity-0 group-hover:opacity-100 text-mute hover:text-danger" title="Удалить персонажа" onClick={e => { e.stopPropagation(); s.deleteCharacter(c.id); }}><Trash2 size={12} /></button></>}
           </div>
         ))}
         {s.leftTab === 'chars' && chars.length === 0 && (
@@ -527,10 +525,119 @@ function MusicField({ nodeId, value }: { nodeId: string; value?: string }) {
   );
 }
 
+function VariableTextarea({ value, onChange, characters, className = 'textarea !min-h-[96px]' }: {
+  value: string; onChange: (value: string) => void; characters: Character[]; className?: string;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const [suggestion, setSuggestion] = useState<VariableAutocomplete>(null);
+  const refresh = (text: string, cursor: number) => setSuggestion(getVariableAutocomplete(text, cursor, characters));
+  const insert = (valueToInsert: string) => {
+    if (!suggestion || !ref.current) return;
+    const start = suggestion.start;
+    const end = suggestion.end;
+    const next = value.slice(0, start) + valueToInsert + value.slice(end);
+    const caret = start + valueToInsert.length;
+    onChange(next);
+    if (suggestion.kind === 'character') refresh(next, caret);
+    else setSuggestion(null);
+    requestAnimationFrame(() => {
+      ref.current?.focus();
+      ref.current?.setSelectionRange(caret, caret);
+    });
+  };
+  return (
+    <div className="relative">
+      <textarea
+        ref={ref}
+        className={className}
+        value={value}
+        onChange={e => { onChange(e.target.value); refresh(e.target.value, e.target.selectionStart); }}
+        onClick={e => refresh(value, e.currentTarget.selectionStart)}
+        onKeyUp={e => {
+          if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) refresh(value, e.currentTarget.selectionStart);
+        }}
+        onBlur={() => window.setTimeout(() => setSuggestion(null), 120)}
+      />
+      {suggestion && (
+        <div className="absolute left-0 right-0 top-full z-[55] mt-1 max-h-48 overflow-y-auto rounded-lg border border-ink-500 bg-ink-950 shadow-2xl p-1">
+          {suggestion.kind === 'character' && suggestion.items.map(character => (
+            <button key={character.id} type="button" className="w-full flex items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] hover:bg-ink-700"
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => insert(`@${characterVariableAlias(character)}.`)}>
+              <span className="w-2 h-2 rounded-full" style={{ background: character.color }} />
+              <span className="flex-1">{character.name}</span>
+              <span className="text-[10px] text-mute font-mono">{characterVariableAlias(character)}</span>
+            </button>
+          ))}
+          {suggestion.kind === 'variable' && suggestion.items.map(variable => (
+            <button key={variable.key} type="button" className="w-full flex items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] hover:bg-ink-700"
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => insert(variable.key)}>
+              <span className="flex-1 font-mono">{variable.key}</span>
+              <span className="text-[10px] text-mute">{VAR_TYPES.find(t => t.id === variable.type)?.label}</span>
+              <span className="text-[10px] text-mute">{String(variable.value)}</span>
+            </button>
+          ))}
+          {suggestion.items.length === 0 && <div className="px-2 py-2 text-[11px] text-mute">Подходящих вариантов нет</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CharacterVariablesEditor({ c }: { c: Character }) {
+  const s = useStore();
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[10.5px] uppercase tracking-wider text-mute">Переменные {c.isNarrator ? '· GLOBAL' : ''}</span>
+        <button className="btn !px-2 !py-0.5" title="Добавить переменную"
+          onClick={() => s.updateCharacter(c.id, { vars: [...c.vars, { key: `var${c.vars.length + 1}`, type: 'int', value: 0 }] })}>
+          <Plus size={12} />
+        </button>
+      </div>
+      <div className="space-y-1.5">
+        {c.vars.map((v, i) => (
+          <div key={i} className="flex gap-1.5">
+            <input className="input flex-1" value={v.key}
+              onChange={e => s.updateCharacter(c.id, { vars: c.vars.map((x, j) => j === i ? { ...x, key: e.target.value } : x) })} />
+            <select className="select !w-24" value={v.type} title="Тип переменной"
+              onChange={e => s.updateCharacter(c.id, { vars: c.vars.map((x, j) => j === i ? { ...x, type: e.target.value as VarType, value: e.target.value === 'string' ? '' : e.target.value === 'bool' ? false : 0 } : x) })}>
+              {VAR_TYPES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+            </select>
+            {v.type === 'bool' ? (
+              <select className="select !w-20" value={String(!!v.value)}
+                onChange={e => s.updateCharacter(c.id, { vars: c.vars.map((x, j) => j === i ? { ...x, value: e.target.value === 'true' } : x) })}>
+                <option value="true">истина</option><option value="false">ложь</option>
+              </select>
+            ) : v.type === 'string' ? (
+              <input className="input !w-24" value={String(v.value ?? '')}
+                onChange={e => s.updateCharacter(c.id, { vars: c.vars.map((x, j) => j === i ? { ...x, value: e.target.value } : x) })} />
+            ) : (
+              <input className="input !w-20" type="number" step={v.type === 'float' ? 0.1 : 1} value={Number(v.value ?? 0)}
+                onChange={e => s.updateCharacter(c.id, { vars: c.vars.map((x, j) => j === i ? { ...x, value: Number(e.target.value) } : x) })} />
+            )}
+            <button className="btn btn-danger !px-2" title="Удалить переменную"
+              onClick={() => s.updateCharacter(c.id, { vars: c.vars.filter((_, j) => j !== i) })}><X size={12} /></button>
+          </div>
+        ))}
+        {c.vars.length === 0 && <div className="text-[11px] text-mute">Переменных пока нет.</div>}
+      </div>
+    </div>
+  );
+}
+
 function CharacterEditor({ c }: { c: Character }) {
   const s = useStore();
   const [expr, setExpr] = useState('smile');
   const [aiTarget, setAiTarget] = useState<{ charId: string; expr: string } | null>(null);
+  if (c.isNarrator) return (
+    <div className="p-3 space-y-3">
+      <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full" style={{ background: '#f4ead8' }} /><span className="font-display font-bold text-[14px]">Рассказчик</span><span className="chip border-amber-glow/60 text-amber-glow">GLOBAL</span></div>
+      <p className="text-[11px] text-mute leading-snug">Рассказчик не отображается на сцене и не имеет спрайтов. Его переменные глобальны и доступны во всех главах через @GLOBAL.имя_переменной.</p>
+      <CharacterVariablesEditor c={c} />
+    </div>
+  );
   return (
     <div className="p-3 space-y-3">
       <div className="flex items-center gap-2">
@@ -561,57 +668,7 @@ function CharacterEditor({ c }: { c: Character }) {
       <Field label="Внешность"><textarea className="textarea" value={c.appearance} onChange={e => s.updateCharacter(c.id, { appearance: e.target.value })} /></Field>
       <Field label="Характер"><textarea className="textarea" value={c.personality} onChange={e => s.updateCharacter(c.id, { personality: e.target.value })} /></Field>
 
-      <div>
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-[10.5px] uppercase tracking-wider text-mute">Переменные</span>
-          <button
-            className="btn !px-2 !py-0.5"
-            title="Добавить переменную"
-            onClick={() => s.updateCharacter(c.id, { vars: [...c.vars, { key: `var${c.vars.length + 1}`, type: 'int', value: 0 }] })}
-          >
-            <Plus size={12} />
-          </button>
-        </div>
-        <div className="space-y-1.5">
-          {c.vars.map((v, i) => (
-            <div key={i} className="flex gap-1.5">
-              <input className="input flex-1" value={v.key} onChange={e => s.updateCharacter(c.id, { vars: c.vars.map((x, j) => j === i ? { ...x, key: e.target.value } : x) })} />
-              <select
-                className="select !w-24"
-                value={v.type}
-                title="Тип переменной"
-                onChange={e => s.updateCharacter(c.id, {
-                  vars: c.vars.map((x, j) => j === i ? { ...x, type: e.target.value as VarType, value: e.target.value === 'string' ? '' : e.target.value === 'bool' ? false : 0 } : x),
-                })}
-              >
-                {VAR_TYPES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
-              </select>
-              {v.type === 'bool' ? (
-                <select
-                  className="select !w-20"
-                  value={String(!!v.value)}
-                  onChange={e => s.updateCharacter(c.id, { vars: c.vars.map((x, j) => j === i ? { ...x, value: e.target.value === 'true' } : x) })}
-                >
-                  <option value="true">истина</option>
-                  <option value="false">ложь</option>
-                </select>
-              ) : v.type === 'string' ? (
-                <input className="input !w-24" value={String(v.value ?? '')} onChange={e => s.updateCharacter(c.id, { vars: c.vars.map((x, j) => j === i ? { ...x, value: e.target.value } : x) })} />
-              ) : (
-                <input
-                  className="input !w-20"
-                  type="number"
-                  step={v.type === 'float' ? 0.1 : 1}
-                  value={Number(v.value ?? 0)}
-                  onChange={e => s.updateCharacter(c.id, { vars: c.vars.map((x, j) => j === i ? { ...x, value: Number(e.target.value) } : x) })}
-                />
-              )}
-              <button className="btn btn-danger !px-2" title="Удалить переменную" onClick={() => s.updateCharacter(c.id, { vars: c.vars.filter((_, j) => j !== i) })}><X size={12} /></button>
-            </div>
-          ))}
-          {c.vars.length === 0 && <div className="text-[11px] text-mute">Переменных нет — добавьте, например, trust или affection.</div>}
-        </div>
-      </div>
+      <CharacterVariablesEditor c={c} />
 
       <div>
         <div className="flex items-center justify-between mb-1">
@@ -744,7 +801,7 @@ export function Inspector() {
                 <Field label="Персонаж">
                   <select className="select" value={d.characterId ?? ''} onChange={e => s.updateNodeData(node.id, { characterId: e.target.value })}>
                     <option value="">— не выбран —</option>
-                    {s.project.characters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    {s.project.characters.map(c => <option key={c.id} value={c.id}>{c.name}{c.isNarrator ? ' · GLOBAL' : ''}</option>)}
                   </select>
                 </Field>
                 <Field label="Эмоция">
@@ -752,9 +809,10 @@ export function Inspector() {
                     {EXPR.map(e => <option key={e} value={e}>{EXPR_RU[e]}</option>)}
                   </select>
                 </Field>
-                <DialogueSpritePreview characterId={d.characterId} expression={d.expression} />
+                {!s.project.characters.find(c => c.id === d.characterId)?.isNarrator && <DialogueSpritePreview characterId={d.characterId} expression={d.expression} />}
                 <Field label="Реплика">
-                  <textarea className="textarea !min-h-[96px]" value={d.text ?? ''} onChange={e => s.updateNodeData(node.id, { text: e.target.value })} />
+                  <VariableTextarea value={d.text ?? ''} characters={s.project.characters} onChange={text => s.updateNodeData(node.id, { text })} />
+                  <span className="text-[10px] text-mute">Подстановка переменных: @ИМЯ_ПЕРСОНАЖА.переменная · Рассказчик: @GLOBAL.переменная</span>
                 </Field>
                 <div className="text-[10.5px] text-mute">{(d.text ?? '').length} символов</div>
                 <button
@@ -788,16 +846,13 @@ export function Inspector() {
 
                 {(d.mode ?? 'menu') !== 'condition' ? (
                   <>
-                    <Field label="Вопрос"><input className="input" value={d.prompt ?? ''} onChange={e => s.updateNodeData(node.id, { prompt: e.target.value })} /></Field>
+                    <Field label="Вопрос"><VariableTextarea className="textarea !min-h-[56px]" value={d.prompt ?? ''} characters={s.project.characters} onChange={prompt => s.updateNodeData(node.id, { prompt })} /></Field>
                     <div className="space-y-1.5">
                       {(d.options ?? []).map((o: any, i: number) => (
                         <div key={o.id} className="flex gap-1.5 items-center">
                           <span className="text-magenta font-bold text-[12px]">{i + 1}</span>
-                          <input
-                            className="input"
-                            value={o.text}
-                            onChange={e => s.updateNodeData(node.id, { options: d.options.map((x: any, j: number) => j === i ? { ...x, text: e.target.value } : x) })}
-                          />
+                          <input className="input" value={o.text}
+                            onChange={e => s.updateNodeData(node.id, { options: d.options.map((x: any, j: number) => j === i ? { ...x, text: e.target.value } : x) })} />
                           <button className="btn btn-danger !px-2" title="Удалить вариант" onClick={() => s.updateNodeData(node.id, { options: d.options.filter((_: any, j: number) => j !== i) })}>
                             <X size={12} />
                           </button>
@@ -962,35 +1017,101 @@ export function Inspector() {
             {node.type === 'entity' && (
               <>
                 <div className="flex gap-1.5">
-                  <button
-                    className="btn flex-1 justify-center"
+                  <button className="btn flex-1 justify-center"
                     style={(d.entityKind ?? 'character') !== 'sprite' ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : {}}
-                    onClick={() => s.updateNodeData(node.id, { entityKind: 'character' })}
-                  >
-                    Персонаж
-                  </button>
-                  <button
-                    className="btn flex-1 justify-center"
+                    onClick={() => s.updateNodeData(node.id, { entityKind: 'character' })}>Персонаж</button>
+                  <button className="btn flex-1 justify-center"
                     style={(d.entityKind ?? 'character') === 'sprite' ? { borderColor: '#2ee6a8', color: '#2ee6a8' } : {}}
-                    onClick={() => s.updateNodeData(node.id, { entityKind: 'sprite' })}
-                  >
-                    Спрайт
-                  </button>
+                    onClick={() => s.updateNodeData(node.id, { entityKind: 'sprite', spriteType: d.spriteType ?? 'asset' })}>Спрайт</button>
                 </div>
 
                 {(d.entityKind ?? 'character') === 'sprite' ? (
-                  <Field label="Спрайт-ассет">
-                    <select className="select" value={d.spriteId ?? ''} onChange={e => s.updateNodeData(node.id, { spriteId: e.target.value })}>
-                      <option value="">— не выбран —</option>
-                      {s.project.sprites.map(sp => <option key={sp.id} value={sp.id}>{sp.name}</option>)}
-                    </select>
-                  </Field>
+                  <>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {(['text', 'geometry', 'asset'] as const).map(type => (
+                        <button key={type} className="btn justify-center !px-1.5"
+                          style={(d.spriteType ?? 'asset') === type ? { borderColor: '#2ee6a8', color: '#2ee6a8' } : {}}
+                          onClick={() => s.updateNodeData(node.id, {
+                            spriteType: type,
+                            entityId: type === 'asset' ? undefined : (d.entityId || node.id),
+                            opacity: d.opacity ?? 100,
+                          })}>
+                          {type === 'text' ? 'Текст' : type === 'geometry' ? 'Геометрия' : 'Спрайт'}
+                        </button>
+                      ))}
+                    </div>
+
+                    {(d.spriteType ?? 'asset') === 'asset' && (
+                      <Field label="Спрайт-ассет">
+                        <select className="select" value={d.spriteId ?? ''} onChange={e => s.updateNodeData(node.id, { spriteId: e.target.value })}>
+                          <option value="">— не выбран —</option>
+                          {s.project.sprites.map(sp => <option key={sp.id} value={sp.id}>{sp.name}</option>)}
+                        </select>
+                      </Field>
+                    )}
+
+                    {(d.spriteType === 'text' || d.spriteType === 'geometry') && (
+                      <Field label="ID объекта (одинаковый для показа, перемещения и скрытия)">
+                        <input className="input font-mono" value={d.entityId ?? node.id}
+                          onChange={e => s.updateNodeData(node.id, { entityId: e.target.value })} />
+                      </Field>
+                    )}
+
+                    {d.spriteType === 'text' && (
+                      <>
+                        <Field label="Текст">
+                          <VariableTextarea value={d.text ?? ''} characters={s.project.characters}
+                            onChange={text => s.updateNodeData(node.id, { text })} />
+                        </Field>
+                        <div className="grid grid-cols-2 gap-2">
+                          <Field label="Цвет фона">
+                            <div className="flex gap-1.5 items-center">
+                              <input type="color" value={d.backgroundColor || '#0b0e15'}
+                                disabled={!d.backgroundColor}
+                                onChange={e => s.updateNodeData(node.id, { backgroundColor: e.target.value })} />
+                              <button className="btn !px-2" onClick={() => s.updateNodeData(node.id, { backgroundColor: d.backgroundColor ? '' : '#0b0e15' })}>
+                                {d.backgroundColor ? 'Без фона' : 'Выбрать'}
+                              </button>
+                            </div>
+                          </Field>
+                          <Field label="Цвет текста">
+                            <input type="color" value={d.textColor ?? '#f4ead8'} onChange={e => s.updateNodeData(node.id, { textColor: e.target.value })} />
+                          </Field>
+                        </div>
+                        <Slider label="Прозрачность" value={d.opacity ?? 100} min={0} max={100} unit="%" onChange={opacity => s.updateNodeData(node.id, { opacity })} />
+                      </>
+                    )}
+
+                    {d.spriteType === 'geometry' && (
+                      <>
+                        <Field label="Тип">
+                          <select className="select" value={d.geometryType ?? 'rectangle'} onChange={e => s.updateNodeData(node.id, { geometryType: e.target.value })}>
+                            <option value="line">Линия</option><option value="rectangle">Прямоугольник</option>
+                            <option value="triangle">Треугольник</option><option value="circle">Круг</option>
+                          </select>
+                        </Field>
+                        <div className="grid grid-cols-2 gap-2">
+                          <Field label="Контур"><input type="color" value={d.strokeColor ?? '#f4ead8'} onChange={e => s.updateNodeData(node.id, { strokeColor: e.target.value })} /></Field>
+                          <Field label="Заливка">
+                            <div className="flex gap-1.5 items-center">
+                              <input type="color" value={d.fillColor || '#39d5ff'} disabled={!d.fillColor}
+                                onChange={e => s.updateNodeData(node.id, { fillColor: e.target.value })} />
+                              <button className="btn !px-2" onClick={() => s.updateNodeData(node.id, { fillColor: d.fillColor ? '' : '#39d5ff' })}>
+                                {d.fillColor ? 'Без заливки' : 'Выбрать'}
+                              </button>
+                            </div>
+                          </Field>
+                        </div>
+                        <Slider label="Прозрачность" value={d.opacity ?? 100} min={0} max={100} unit="%" onChange={opacity => s.updateNodeData(node.id, { opacity })} />
+                      </>
+                    )}
+                  </>
                 ) : (
                   <>
                     <Field label="Персонаж">
                       <select className="select" value={d.characterId ?? ''} onChange={e => s.updateNodeData(node.id, { characterId: e.target.value })}>
                         <option value="">— не выбран —</option>
-                        {s.project.characters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        {s.project.characters.filter(c => !c.isNarrator).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                       </select>
                     </Field>
                     <Field label="Настроение">
@@ -1035,7 +1156,7 @@ export function Inspector() {
                   <Field label="Z-индекс"><input className="input" type="number" min={0} max={40} placeholder="авто" value={d.z ? Math.round(d.z) : ''} onChange={e => s.updateNodeData(node.id, { z: e.target.value === '' ? 0 : Number(e.target.value) })} /></Field>
                 </div>
                 <Slider label="Позиция X" value={Math.round(d.x ?? 50)} min={-20} max={120} unit="%" onChange={v => s.updateNodeData(node.id, { x: v })} />
-                <Slider label="Позиция Y (низ спрайта)" value={Math.round(d.y ?? 74)} min={-20} max={120} unit="%" onChange={v => s.updateNodeData(node.id, { y: v })} />
+                <Slider label="Позиция Y (низ объекта)" value={Math.round(d.y ?? 74)} min={-20} max={120} unit="%" onChange={v => s.updateNodeData(node.id, { y: v })} />
                 <Slider label="Размер" value={Math.round(d.scale ?? 100)} min={10} max={300} unit="%" onChange={v => s.updateNodeData(node.id, { scale: v })} />
                 <Slider label="Z-индекс" value={Math.round(d.z ?? 0)} min={0} max={40} unit={d.z ? '' : ' (авто)'} onChange={v => s.updateNodeData(node.id, { z: v })} />
                 <Slider label="Длительность эффекта" value={d.duration ?? 0.6} min={0.1} max={3} step={0.1} unit="с" onChange={v => s.updateNodeData(node.id, { duration: v })} />
@@ -1044,11 +1165,10 @@ export function Inspector() {
                   <Eye size={13} /> Показать на сцене
                 </button>
                 <div className="text-[11px] text-mute leading-snug">
-                  В предпросмотре сущность можно перетаскивать мышью и менять размер колесом или ручкой — значения пишутся прямо в эту ноду.
+                  Для текстовых и геометрических объектов повторяйте один и тот же ID в нодах показа, перемещения и скрытия. Размер и позицию можно настроить в предпросмотре.
                 </div>
               </>
             )}
-
             {node.type === 'pause' && (
               <>
                 <Field label="Секунды">

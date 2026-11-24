@@ -26,7 +26,7 @@ update_node {id, patch} — ИЗМЕНИТЬ НАСТРОЙКИ УЖЕ СУЩЕ�
 - variable: charId (id персонажа), key (имя переменной), varType (string|int|float|bool), op (для string: set|concat; int/float: set|add|sub|mul; bool: set|toggle|and|or), value.
 - background: bg (id фона), fx (none|fade|slide-left|slide-right|slide-up|slide-down|zoom|blur), duration (секунды 0.1–3).
 - music: track (id аудиотрека), mode (music|effect).
-- entity: entityKind (character|sprite), characterId или spriteId (соответствующий id), expression (neutral|smile|angry|sad|surprised), action (show|move|hide), fxShow/fxHide (none|fade|slide-left|slide-right|slide-up|slide-down|zoom|blur), fxMove (linear|ease-in|ease-out|ease-in-out|overshoot|spring), x/y (позиция на сцене в %, -20…120), scale (10…300%), z (0…40), duration (0.1–3 сек).
+- entity: entityKind (character|sprite); для character — characterId только обычного героя; для sprite выбери spriteType (asset|text|geometry). asset использует spriteId; text — entityId, text, backgroundColor (пустая строка = без фона), textColor, opacity (0–100); geometry — entityId, geometryType (line|rectangle|triangle|circle), strokeColor, fillColor (пустая строка = без заливки), opacity (0–100). Общие настройки: action (show|move|hide), fxShow/fxHide, fxMove, x/y, scale, z, duration.
 - pause: seconds (секунды; -1 означает ждать клика, 0 — ждать завершения предыдущего эффекта).
 - jump: sceneId (id целевой главы).
 - start/end: настроек нет.
@@ -168,7 +168,7 @@ const NODE_PATCH_FIELDS: Record<NodeKind, string[]> = {
   variable: ['charId', 'key', 'varType', 'op', 'value'],
   background: ['bg', 'fx', 'duration'],
   music: ['track', 'mode'],
-  entity: ['entityKind', 'characterId', 'spriteId', 'expression', 'action', 'fxShow', 'fxMove', 'fxHide', 'x', 'y', 'scale', 'z', 'duration'],
+  entity: ['entityKind', 'spriteType', 'entityId', 'characterId', 'spriteId', 'expression', 'action', 'fxShow', 'fxMove', 'fxHide', 'text', 'backgroundColor', 'textColor', 'opacity', 'geometryType', 'strokeColor', 'fillColor', 'x', 'y', 'scale', 'z', 'duration'],
   pause: ['seconds'],
   jump: ['sceneId'],
 };
@@ -321,9 +321,21 @@ function normalizeAgentPatch(node: any, args: Record<string, any>, project: any)
     requireEnum('mode', ['music', 'effect']);
   } else if (node.type === 'entity') {
     requireEnum('entityKind', ['character', 'sprite']);
-    validResource('characterId', project.characters);
-    validResource('spriteId', project.sprites);
-    requireEnum('expression', EMOTIONS);
+    if ((next.entityKind ?? data.entityKind) === 'character') {
+      validResource('characterId', (project.characters ?? []).filter((item: any) => !item.isNarrator && item.id !== 'global'));
+      if ('spriteType' in next || 'spriteId' in next) throw new Error('У сущности-персонажа нельзя задавать тип спрайта или spriteId.');
+      requireEnum('expression', EMOTIONS);
+    } else {
+      requireEnum('spriteType', ['asset', 'text', 'geometry']);
+      const spriteType = String(next.spriteType ?? data.spriteType ?? 'asset');
+      if (spriteType === 'asset') validResource('spriteId', project.sprites);
+      else {
+        asString('entityId'); asString('text'); asString('backgroundColor'); asString('textColor');
+        asString('strokeColor'); asString('fillColor');
+        requireEnum('geometryType', ['line', 'rectangle', 'triangle', 'circle']);
+        asNumber('opacity', 0, 100);
+      }
+    }
     requireEnum('action', ['show', 'move', 'hide']);
     requireEnum('fxShow', EFFECTS);
     requireEnum('fxHide', EFFECTS);

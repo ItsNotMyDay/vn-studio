@@ -136,21 +136,36 @@ export function EntityView({ ent }: { ent: StageEntity }) {
   const ch = useStore(s => (ent.kind === 'character' ? s.project.characters.find(c => c.id === ent.refId) : undefined));
   const asset = useStore(s => (ent.kind === 'sprite' ? s.project.sprites.find(x => x.id === ent.refId) : undefined));
   const charSpriteUrl = useAssetURL(ent.kind === 'character' ? ch?.sprites?.[ent.expression] : undefined);
-  const spriteUrl = useAssetURL(ent.kind === 'sprite' ? asset?.assetId : undefined);
+  const spriteUrl = useAssetURL(ent.kind === 'sprite' && (ent.spriteType ?? 'asset') === 'asset' ? asset?.assetId : undefined);
   const url = ent.kind === 'character' ? charSpriteUrl : spriteUrl;
   const glow = ch?.color ?? '#2ee6a8';
-
+  if (ent.kind === 'sprite' && ent.spriteType === 'text') {
+    return (
+      <div className="h-full min-w-[180px] max-w-[48vw] flex items-center justify-center rounded-xl px-5 py-3 whitespace-pre-wrap text-center leading-relaxed shadow-xl"
+        style={{ background: ent.backgroundColor || 'transparent', color: ent.textColor ?? '#f4ead8', opacity: (ent.opacity ?? 100) / 100, fontSize: 'clamp(12px, 2.4vw, 30px)', border: ent.backgroundColor ? '1px solid #ffffff22' : 'none' }}>
+        {ent.text}
+      </div>
+    );
+  }
+  if (ent.kind === 'sprite' && ent.spriteType === 'geometry') {
+    const fill = ent.fillColor || 'none';
+    const stroke = ent.strokeColor ?? '#f4ead8';
+    let shape: any;
+    switch (ent.geometryType ?? 'rectangle') {
+      case 'line': shape = <line x1="8" y1="50" x2="92" y2="50" />; break;
+      case 'triangle': shape = <polygon points="50,7 93,91 7,91" fill={fill} />; break;
+      case 'circle': shape = <circle cx="50" cy="50" r="42" fill={fill} />; break;
+      default: shape = <rect x="8" y="8" width="84" height="84" rx="2" fill={fill} />;
+    }
+    return <svg viewBox="0 0 100 100" className="h-full aspect-square shrink-0" style={{ overflow: 'visible', opacity: (ent.opacity ?? 100) / 100 }} fill="none" stroke={stroke} strokeWidth="3">{shape}</svg>;
+  }
   if (url) {
     return <img src={url} alt="" draggable={false} className="h-full object-contain select-none shrink-0" style={{ filter: `drop-shadow(0 0 18px ${glow}44)` }} />;
   }
   if (ent.kind === 'character' && ch) {
     return <div className="h-full shrink-0" style={{ filter: `drop-shadow(0 0 18px ${glow}44)` }}><ProcSprite ch={ch} expression={ent.expression} /></div>;
   }
-  return (
-    <div className="h-full w-24 rounded-lg border border-dashed border-ink-500 bg-ink-850/70 flex items-center justify-center">
-      <ImageIcon size={20} className="text-mute" />
-    </div>
-  );
+  return <div className="h-full w-24 rounded-lg border border-dashed border-ink-500 bg-ink-850/70 flex items-center justify-center"><ImageIcon size={20} className="text-mute" /></div>;
 }
 
 /* ------------------------------------ stage ---------------------------------- */
@@ -295,7 +310,7 @@ export function Stage({ full = false }: { full?: boolean }) {
         {Object.entries(player.vars).map(([k, v]) => {
           const [cid, key] = k.split('.');
           const c = chars.find(c => c.id === cid);
-          return <span key={k} className="chip" style={{ borderColor: `${c?.color}66`, color: c?.color }}>{c?.name}.{key} <b>{String(v)}</b></span>;
+          return <span key={k} className="chip" style={{ borderColor: `${c?.color ?? '#f4ead8'}66`, color: c?.isNarrator ? '#f4ead8' : c?.color }}>{c?.isNarrator ? 'GLOBAL' : c?.name ?? cid}.{key} <b>{String(v)}</b></span>;
         })}
       </div>
       <div className="absolute top-8 right-3" style={{ zIndex: 15 }}>
@@ -349,23 +364,21 @@ export function Stage({ full = false }: { full?: boolean }) {
       )}
 
       {line && !player.pending && (
-        <div
-          className="absolute inset-x-4 bottom-8 rounded-xl border px-5 py-3.5 backdrop-blur-sm"
-          style={{
-            background: `rgba(11,14,21,${director.boxOpacity / 100})`,
-            borderColor: `${speaker?.color ?? '#ffb454'}88`,
-            boxShadow: `0 0 24px ${speaker?.color ?? '#ffb454'}22`,
-            zIndex: 20,
-          }}
-        >
-          <div className="absolute -top-3 left-4 px-3 py-0.5 rounded-md text-[12px] font-bold text-ink-950" style={{ background: speaker?.color ?? '#ffb454' }}>
-            {speaker?.name ?? '???'}
-          </div>
-          <p className="text-paper leading-relaxed min-h-[2.6em]" style={{ fontSize: director.fontSize }}>
-            {line.text.slice(0, typed)}{!done && <span className="caret" />}
-          </p>
-          {done && <span className="absolute right-4 bottom-2 text-[11px] animate-pulse" style={{ color: speaker?.color }}>▸ далее</span>}
-        </div>
+        (() => {
+          const isNarrator = !!speaker?.isNarrator || line.characterId === 'global';
+          return (
+            <div
+              className={isNarrator ? "absolute left-1/2 -translate-x-1/2 bottom-10 w-[min(900px,84%)] rounded-xl px-6 py-4 backdrop-blur-sm shadow-2xl" : "absolute inset-x-4 bottom-8 rounded-xl border px-5 py-3.5 backdrop-blur-sm"}
+              style={isNarrator ? { background: 'rgba(244,234,216,0.88)', border: '1px solid rgba(255,255,255,0.55)', boxShadow: '0 8px 36px rgba(0,0,0,0.35)', zIndex: 20 } : { background: `rgba(11,14,21,${director.boxOpacity / 100})`, borderColor: `${speaker?.color ?? '#ffb454'}88`, boxShadow: `0 0 24px ${speaker?.color ?? '#ffb454'}22`, zIndex: 20 }}
+            >
+              {!isNarrator && <div className="absolute -top-3 left-4 px-3 py-0.5 rounded-md text-[12px] font-bold text-ink-950" style={{ background: speaker?.color ?? '#ffb454' }}>{speaker?.name ?? '???'}</div>}
+              <p className={isNarrator ? "text-ink-950 text-center leading-relaxed whitespace-pre-wrap" : "text-paper leading-relaxed min-h-[2.6em]"} style={{ fontSize: director.fontSize }}>
+                {line.text.slice(0, typed)}{!done && <span className={isNarrator ? "inline-block w-1.5 h-4 bg-ink-950/70 animate-pulse align-middle" : "caret"} />}
+              </p>
+              {done && !isNarrator && <span className="absolute right-4 bottom-2 text-[11px] animate-pulse" style={{ color: speaker?.color }}>▸ далее</span>}
+            </div>
+          );
+        })()
       )}
 
       {!player.running && (
