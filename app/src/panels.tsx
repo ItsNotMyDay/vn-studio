@@ -545,7 +545,6 @@ function VariableTextarea({ value, onChange, characters, className = 'textarea !
       ref.current?.setSelectionRange(caret, caret);
     });
   };
-  const items = suggestion?.kind === 'character' ? suggestion.items : suggestion?.kind === 'variable' ? suggestion.items : [];
   return (
     <div className="relative">
       <textarea
@@ -561,7 +560,7 @@ function VariableTextarea({ value, onChange, characters, className = 'textarea !
       />
       {suggestion && (
         <div className="absolute left-0 right-0 top-full z-[55] mt-1 max-h-48 overflow-y-auto rounded-lg border border-ink-500 bg-ink-950 shadow-2xl p-1">
-          {suggestion.kind === 'character' && items.map(character => (
+          {suggestion.kind === 'character' && suggestion.items.map(character => (
             <button key={character.id} type="button" className="w-full flex items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] hover:bg-ink-700"
               onMouseDown={e => e.preventDefault()}
               onClick={() => insert(`@${characterVariableAlias(character)}.`)}>
@@ -570,7 +569,7 @@ function VariableTextarea({ value, onChange, characters, className = 'textarea !
               <span className="text-[10px] text-mute font-mono">{characterVariableAlias(character)}</span>
             </button>
           ))}
-          {suggestion.kind === 'variable' && items.map(variable => (
+          {suggestion.kind === 'variable' && suggestion.items.map(variable => (
             <button key={variable.key} type="button" className="w-full flex items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] hover:bg-ink-700"
               onMouseDown={e => e.preventDefault()}
               onClick={() => insert(variable.key)}>
@@ -579,7 +578,7 @@ function VariableTextarea({ value, onChange, characters, className = 'textarea !
               <span className="text-[10px] text-mute">{String(variable.value)}</span>
             </button>
           ))}
-          {items.length === 0 && <div className="px-2 py-2 text-[11px] text-mute">Подходящих вариантов нет</div>}
+          {suggestion.items.length === 0 && <div className="px-2 py-2 text-[11px] text-mute">Подходящих вариантов нет</div>}
         </div>
       )}
     </div>
