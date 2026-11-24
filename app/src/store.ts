@@ -355,6 +355,7 @@ function migrateNode(nd: any): Node {
   if (nd.type === 'entity') {
     d.entityKind = d.entityKind === 'sprite' ? 'sprite' : 'character';
     d.spriteType = ['text', 'geometry', 'asset'].includes(d.spriteType) ? d.spriteType : 'asset';
+    if (['text', 'geometry'].includes(d.spriteType) && !d.entityId) d.entityId = `object_${nd.id}`;
     d.action = ['show', 'move', 'hide'].includes(d.action) ? d.action : 'show';
     const legacy = d.effect ?? 'fade';
     d.fxShow = d.fxShow ?? legacy;
@@ -619,7 +620,7 @@ export const useStore = create<Store>((set, get) => {
   };
 
   const entityKey = (kind: EntityKind, refId: string) => `${kind === 'character' ? 'char' : 'sprite'}:${refId}`;
-  const entityRefId = (d: any, nodeId: string) => d.entityKind !== 'sprite' ? d.characterId : ['text', 'geometry'].includes(d.spriteType) ? (d.entityId || `object_${nodeId}`) : d.spriteId;
+  const entityRefId = (d: any, nodeId: string) => d.entityKind !== 'sprite' ? d.characterId : (d.entityId || (['text', 'geometry'].includes(d.spriteType) ? `object_${nodeId}` : d.spriteId));
   const markFx = (ms: number) => { lastFxUntil = Math.max(lastFxUntil, Date.now() + ms); };
 
   const scheduleHide = (nodeId: string, key: string, ms: number) => {
@@ -665,11 +666,11 @@ export const useStore = create<Store>((set, get) => {
       duration: num(d.duration, 0.6),
       z: d.z ? num(d.z, 1) : (prev?.z ?? Object.keys(entities).length + 1),
       hiding: false,
-      spriteType: kind === 'sprite' ? (d.spriteType ?? 'asset') : undefined,
-      text: kind === 'sprite' && d.spriteType === 'text' ? resolveVariableText(String(d.text ?? ''), get().project.characters, vars) : undefined,
-      backgroundColor: d.backgroundColor ?? '', textColor: d.textColor ?? '#f4ead8',
-      geometryType: d.geometryType ?? 'rectangle', strokeColor: d.strokeColor ?? '#f4ead8', fillColor: d.fillColor ?? '',
-      opacity: typeof d.opacity === 'number' ? d.opacity : 100,
+      spriteType: kind === 'sprite' ? (d.spriteType ?? prev?.spriteType ?? 'asset') : undefined,
+      text: kind === 'sprite' && (d.spriteType ?? prev?.spriteType) === 'text' ? (d.text != null ? resolveVariableText(String(d.text), get().project.characters, vars) : (prev?.text ?? '')) : undefined,
+      backgroundColor: d.backgroundColor ?? prev?.backgroundColor ?? '', textColor: d.textColor ?? prev?.textColor ?? '#f4ead8',
+      geometryType: d.geometryType ?? prev?.geometryType ?? 'rectangle', strokeColor: d.strokeColor ?? prev?.strokeColor ?? '#f4ead8', fillColor: d.fillColor ?? prev?.fillColor ?? '',
+      opacity: typeof d.opacity === 'number' ? d.opacity : (prev?.opacity ?? 100),
     };
     entities[key] = ent;
     if (kind === 'character') sprites[refId] = { expression: ent.expression };
@@ -1062,7 +1063,7 @@ export const useStore = create<Store>((set, get) => {
       audioEngine.audioEnsure?.();
       audioEngine.audioTick?.(760, 0.06, 0.08);
       const p = get().project;
-      const firstChar = p.characters.find(ch => !ch.isNarrator) ?? p.characters[0];
+      const firstChar = p.characters.find(ch => !ch.isNarrator);
       const defaults: Record<NodeKind, any> = {
         start: {},
         end: {},
