@@ -4,8 +4,9 @@ import { useStore } from './store';
 import { useAssetURL } from './assets';
 import {
   loadAiSettings, saveAiSettings, buildSpritePrompt, aiHealth, aiStartJob, aiPollJob, aiCancelJob,
-  base64ToBlob, bakeProceduralSprite, EMOTION_RU, colorName, skinTone, type AiSettings, type JobState,
+  base64ToBlob, bakeProceduralSprite, EMOTION_RU, colorName, skinTone, type AiSettings, type JobState, type LocalQuantizationMode,
 } from './ai';
+import { QuantizationDialog } from './QuantizationDialog';
 
 type Phase = 'idle' | 'checking' | 'loading' | 'generating' | 'done' | 'error';
 
@@ -22,6 +23,12 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
   const [health, setHealth] = useState<{ ok: boolean; device?: string; model_loaded?: boolean; error?: string }>({ ok: false });
   const [result, setResult] = useState<{ url: string; blob: Blob; source: 'ai' | 'procedural'; seed: number } | null>(null);
   const [usedSeed, setUsedSeed] = useState<number>(0);
+  const [quantizationOpen, setQuantizationOpen] = useState(false);
+  const [pendingLoadAction, setPendingLoadAction] = useState<
+    | { kind: 'load' }
+    | { kind: 'generate'; seed?: number }
+    | null
+  >(null);
   const abortRef = useRef<AbortController | null>(null);
   const jobRef = useRef<string | null>(null);
   const aliveRef = useRef(true);
@@ -77,7 +84,26 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
     return final;
   };
 
-  const generate = async () => {
+  const loadLocalModel = async (quantization: LocalQuantizationMode): Promise<boolean> => {
+    setPhase('loading'); setStage('Загрузка модели…'); setProgress(0);
+    try {
+      await runJob('/model/load', {
+        model_id: cfg.modelId,
+        model_path: cfg.modelPath,
+        quantization,
+      }, 'Загрузка весов модели');
+      const h = await aiHealth(cfg.endpoint);
+      setHealth(h);
+      if (!h.model_loaded) throw new Error('Модель не загрузилась. Проверьте путь к весам в настройках сервера.');
+      setPhase('idle'); setStage(''); setMessage('Модель загружена и готова');
+      return true;
+    } catch (e: any) {
+      setPhase('error'); setStage(''); setMessage(e?.message ?? 'Ошибка загрузки модели');
+      return false;
+    }
+  };
+
+  const generate = async (seed?: number, quantization?: LocalQuantizationMode) => {
     if (!c) return;
     setResult(null); setMessage(''); setProgress(0);
     try {
@@ -86,15 +112,18 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
       if (!aliveRef.current) return;
       setHealth(h);
       if (!h.ok) throw new Error(`Локальный сервер не запущен (${cfg.endpoint}). Поднимите ai-server/server.py или нажмите «Локальный рендер».`);
-      if (!h.model_loaded && cfg.autoLoad) {
-        setPhase('loading'); setStage('Загрузка модели…');
-        await runJob('/model/load', { model_id: cfg.modelId, model_path: cfg.modelPath }, 'Загрузка весов модели');
-        const h2 = await aiHealth(cfg.endpoint);
-        setHealth(h2);
-        if (!h2.model_loaded) throw new Error('Модель не загрузилась. Проверьте путь к весам в настройках сервера.');
+      if (!h.model_loaded) {
+        if (!cfg.autoLoad) throw new Error('Автозагрузка отключена. Сначала загрузите модель вручную.');
+        if (!quantization) {
+          setPendingLoadAction({ kind: 'generate', seed });
+          setQuantizationOpen(true);
+          setPhase('idle'); setStage(''); setMessage('Выберите режим загрузки локальной модели');
+          return;
+        }
+        if (!await loadLocalModel(quantization)) return;
       }
       setPhase('generating'); setStage('Генерация спрайта…');
-      const seed = cfg.seed < 0 ? Math.floor(Math.random() * 2 ** 31) : cfg.seed;
+      const useSeed = seed ?? (cfg.seed < 0 ? Math.floor(Math.random() * 2 ** 31) : cfg.seed);
       const final = await runJob('/generate', {
         model_id: cfg.modelId,
         prompt,
@@ -103,7 +132,7 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
         height: cfg.height,
         steps: cfg.steps,
         guidance: cfg.guidance,
-        seed,
+        seed: useSeed,
         transparent: cfg.transparent,
       }, 'Диффузия');
       if (!final.result || !('image_base64' in final.result)) {
@@ -112,8 +141,8 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
       const imageResult = final.result;
       const blob = base64ToBlob(imageResult.image_base64, imageResult.mime);
       const url = URL.createObjectURL(blob);
-      setUsedSeed(imageResult.seed ?? seed);
-      setResult({ url, blob, source: 'ai', seed: imageResult.seed ?? seed });
+      setUsedSeed(imageResult.seed ?? useSeed);
+      setResult({ url, blob, source: 'ai', seed: imageResult.seed ?? useSeed });
       setPhase('done'); setStage('Готово'); setProgress(1);
       setHealth(hh => ({ ...hh, model_loaded: true }));
     } catch (e: any) {
@@ -267,13 +296,9 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
                 <span className={`toggle ${cfg.autoLoad ? 'on' : ''}`} /><span className="text-[11px] text-mute">Автозагрузка модели</span>
               </button>
               <button className="btn" onClick={checkServer}><RefreshCw size={13} /> Проверить сервер</button>
-              <button className="btn" disabled={busy} onClick={async () => {
-                setPhase('loading'); setStage('Загрузка модели…'); setProgress(0);
-                try {
-                  await runJob('/model/load', { model_id: cfg.modelId, model_path: cfg.modelPath }, 'Загрузка весов');
-                  const h = await aiHealth(cfg.endpoint); setHealth(h);
-                  setPhase('idle'); setStage(''); setMessage(h.model_loaded ? 'Модель загружена и готова' : 'Модель не загружена');
-                } catch (e: any) { setPhase('error'); setStage(''); setMessage(e?.message ?? 'Ошибка загрузки'); }
+              <button className="btn" disabled={busy} onClick={() => {
+                setPendingLoadAction({ kind: 'load' });
+                setQuantizationOpen(true);
               }}><Server size={13} /> Загрузить модель</button>
             </div>
 
@@ -301,6 +326,18 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
           </div>
         </div>
       </div>
+      <QuantizationDialog
+        open={quantizationOpen}
+        modelName={cfg.modelId}
+        onClose={() => { setQuantizationOpen(false); setPendingLoadAction(null); }}
+        onSelect={mode => {
+          const action = pendingLoadAction;
+          setQuantizationOpen(false);
+          setPendingLoadAction(null);
+          if (action?.kind === 'load') void loadLocalModel(mode);
+          else if (action?.kind === 'generate') void generate(action.seed, mode);
+        }}
+      />
     </div>
   );
 }

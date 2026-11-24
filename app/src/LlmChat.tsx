@@ -3,6 +3,8 @@ import { MessageSquare, Send, Loader2, X, Server, Trash2, RefreshCw, Square, Dat
 import { useStore } from './store';
 import { aiHealth, llmHealth, llmLoadJob, llmChat, aiCancelJob, embeddingsSearch, embeddingsIndex, loadAiSettings, openAiListModels, type AiSettings, type LlmMessage, type RichContext } from './ai';
 import { TOOLS_DOC, canvasSnapshot, parsePlan, executePlan, describeAction, type AgentPlan, type ExecResult } from './agentTools';
+import { QuantizationDialog } from './QuantizationDialog';
+import type { LocalQuantizationMode } from './ai';
 
 function normalizeEndpoint(ep?: string) {
   return (ep && ep.trim() ? ep.trim() : 'http://127.0.0.1:8765').replace(/\/+$/, '');
@@ -58,6 +60,7 @@ export function LlmChat() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [loadingModel, setLoadingModel] = useState(false);
+  const [quantizationOpen, setQuantizationOpen] = useState(false);
   const [loadProg, setLoadProg] = useState<{ p: number; stage: string }>({ p: 0, stage: '' });
   const [status, setStatus] = useState<LlmStatus>({ online: false, loaded: false });
   const [isOpen, setIsOpen] = useState(false);
@@ -114,11 +117,11 @@ export function LlmChat() {
 
   const push = (content: string) => setMessages(m => [...m, { role: 'assistant', content }]);
 
-  const loadLlm = async () => {
+  const loadLlm = async (quantization: LocalQuantizationMode) => {
     setLoadingModel(true);
     setLoadProg({ p: 0, stage: 'Старт…' });
     try {
-      const r = await llmLoadJob(endpoint, aiCfg.llmPath || null, (p, stage) => setLoadProg({ p, stage }));
+      const r = await llmLoadJob(endpoint, aiCfg.llmPath || null, quantization, (p, stage) => setLoadProg({ p, stage }));
       if (r.ok) { setStatus(st => ({ ...st, loaded: true, error: null })); s.toast('LLM загружена и готова'); }
       else s.toast(`Ошибка загрузки LLM: ${r.error ?? 'неизвестно'}`);
     } catch (e: any) { s.toast(`Ошибка: ${e?.message ?? e}`); }
@@ -391,7 +394,7 @@ export function LlmChat() {
               </div>
             </>
           ) : (
-            <button className="btn btn-primary w-full justify-center" onClick={loadLlm}><Server size={13} /> Загрузить LLM</button>
+            <button className="btn btn-primary w-full justify-center" onClick={() => setQuantizationOpen(true)}><Server size={13} /> Загрузить LLM</button>
           )}
         </div>
       )}
@@ -413,6 +416,12 @@ export function LlmChat() {
           )}
         </div>
       </div>
+      <QuantizationDialog
+        open={quantizationOpen}
+        modelName={modelName(aiCfg.llmPath)}
+        onClose={() => setQuantizationOpen(false)}
+        onSelect={mode => { setQuantizationOpen(false); void loadLlm(mode); }}
+      />
     </div>
   );
 }

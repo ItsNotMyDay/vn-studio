@@ -3,8 +3,9 @@ import { Image as ImageIcon, X, RefreshCw, Dice5, Square, Check, Loader2, Server
 import { useStore } from './store';
 import {
   loadAiSettings, saveAiSettings, aiHealth, aiStartJob, aiPollJob, aiCancelJob, base64ToBlob,
-  type AiSettings,
+  type AiSettings, type LocalQuantizationMode,
 } from './ai';
+import { QuantizationDialog } from './QuantizationDialog';
 
 const RESOLUTIONS = [
   { id: '16:9', w: 1280, h: 720, label: '16:9 · экран новеллы' },
@@ -43,6 +44,8 @@ export function AiBackgroundDialog({ open, onClose }: { open: boolean; onClose: 
   const [health, setHealth] = useState<{ ok: boolean; device?: string; model_loaded?: boolean }>({ ok: false });
   const [result, setResult] = useState<{ url: string; blob: Blob; seed: number } | null>(null);
   const [usedSeed, setUsedSeed] = useState(0);
+  const [quantizationOpen, setQuantizationOpen] = useState(false);
+  const [pendingSeed, setPendingSeed] = useState<number | undefined>(undefined);
   const abortRef = useRef<AbortController | null>(null);
   const jobRef = useRef<string | null>(null);
   const aliveRef = useRef(true);
@@ -77,7 +80,7 @@ export function AiBackgroundDialog({ open, onClose }: { open: boolean; onClose: 
     return parts.join(', ');
   };
 
-  const generate = async (seed?: number) => {
+  const generate = async (seed?: number, quantization?: LocalQuantizationMode) => {
     setResult(null);
     setMessage('');
     setProgress(0);
@@ -88,9 +91,16 @@ export function AiBackgroundDialog({ open, onClose }: { open: boolean; onClose: 
       if (!aliveRef.current) return;
       setHealth(h);
       if (!h.ok) throw new Error(`Сервер генерации недоступен (${endpoint}). Запустите ai-server/server.py.`);
+      if (!h.model_loaded && !quantization) {
+        setPendingSeed(seed);
+        setQuantizationOpen(true);
+        setPhase('idle'); setStage(''); setMessage('Выберите режим загрузки локальной модели');
+        return;
+      }
       const useSeed = seed ?? (cfg.seed < 0 ? Math.floor(Math.random() * 2 ** 31) : cfg.seed);
       const jobId = await aiStartJob(endpoint, '/generate', {
         model_id: cfg.modelId,
+        quantization: quantization ?? 'none',
         prompt: fullPrompt(),
         negative_prompt: cfg.negative,
         width: res.w,
@@ -280,6 +290,17 @@ export function AiBackgroundDialog({ open, onClose }: { open: boolean; onClose: 
           </div>
         </div>
       </div>
+      <QuantizationDialog
+        open={quantizationOpen}
+        modelName={cfg.modelId}
+        onClose={() => { setQuantizationOpen(false); setPendingSeed(undefined); }}
+        onSelect={mode => {
+          const seed = pendingSeed;
+          setQuantizationOpen(false);
+          setPendingSeed(undefined);
+          void generate(seed, mode);
+        }}
+      />
     </div>
   );
 }

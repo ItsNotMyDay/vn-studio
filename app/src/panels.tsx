@@ -17,12 +17,13 @@ import { useAssetURL, getAssetURL } from './assets';
 import { launchPlayer, post } from './bus';
 import { AiSpriteDialog } from './AiSpriteDialog';
 import { AiBackgroundDialog } from './AiBackgroundDialog';
+import { QuantizationDialog } from './QuantizationDialog';
 import {
   loadAiSettings, saveAiSettings, aiHealth, llmHealth, embeddingsHealth, aiListModels,
   aiLoadJob, llmLoadJob, aiUnloadModel, llmUnload, aiCancelJob,
   aiDownloadHfModel, openAiListModels, normalizeOpenAiBase,
   aiSystemDiagnostics, aiModelCompatibility,
-  type AiSettings, type ModelCompatibilityReport,
+  type AiSettings, type ModelCompatibilityReport, type LocalQuantizationMode,
 } from './ai';
 
 const KIND_ICONS: Record<string, any> = {
@@ -1288,6 +1289,7 @@ function AiModelsPanel() {
   const [compatibilityReport, setCompatibilityReport] = useState<ModelCompatibilityReport | null>(null);
   const [compatibilityOpen, setCompatibilityOpen] = useState(false);
   const [compatibilityLoading, setCompatibilityLoading] = useState(false);
+  const [quantizationTarget, setQuantizationTarget] = useState<null | 'image' | 'llm'>(null);
   const ep = (s.director.aiEndpoint || 'http://127.0.0.1:8765').replace(/\/+$/, '');
 
   useEffect(() => {
@@ -1442,23 +1444,23 @@ function AiModelsPanel() {
     }
   };
 
-  const loadImg = async () => {
+  const loadImg = async (quantization: LocalQuantizationMode) => {
     const report = await checkCompatibility('image', false);
     const warning = report?.warnings?.[0] || (!report?.can_load ? report?.reasons?.[0] : '');
     setProg(p => ({ ...p, img: { on: true, p: 0, stage: warning ? '⚠️ ' + warning + ' · попытка загрузки' : 'Подготовка профиля запуска…' } }));
     try {
-      await aiLoadJob(ep, cfg.modelId, cfg.modelPath, (pr, st) => setProg(p => ({ ...p, img: { on: true, p: pr, stage: st } })));
+      await aiLoadJob(ep, cfg.modelId, cfg.modelPath, quantization, (pr, st) => setProg(p => ({ ...p, img: { on: true, p: pr, stage: st } })));
       s.toast('Модель генерации загружена');
     } catch (e: any) { s.toast(`Ошибка: ${e?.message ?? e}`); }
     setProg(p => ({ ...p, img: { on: false, p: 0, stage: '' } }));
   };
 
-  const loadLlm = async () => {
+  const loadLlm = async (quantization: LocalQuantizationMode) => {
     const report = await checkCompatibility('llm', false);
     const warning = report?.warnings?.[0] || (!report?.can_load ? report?.reasons?.[0] : '');
     setProg(p => ({ ...p, llm: { on: true, p: 0, stage: warning ? '⚠️ ' + warning + ' · попытка загрузки' : 'Подготовка профиля запуска…' } }));
     try {
-      const r = await llmLoadJob(ep, cfg.llmPath || null, (pr, st) => setProg(p => ({ ...p, llm: { on: true, p: pr, stage: st } })));
+      const r = await llmLoadJob(ep, cfg.llmPath || null, quantization, (pr, st) => setProg(p => ({ ...p, llm: { on: true, p: pr, stage: st } })));
       if (r.ok) s.toast(`LLM загружена (${r.device})`);
       else s.toast(`Ошибка: ${r.error}`);
     } catch (e: any) { s.toast(`Ошибка: ${e?.message ?? e}`); }
@@ -1513,7 +1515,7 @@ function AiModelsPanel() {
         </div>
         {prog.img.on && <ProgressBar p={prog.img.p} stage={prog.img.stage} />}
         <div className="flex gap-1.5">
-          <button className="btn flex-1 justify-center" disabled={prog.img.on || compatibilityLoading} onClick={loadImg}><Server size={12} /> Загрузить</button>
+          <button className="btn flex-1 justify-center" disabled={prog.img.on || compatibilityLoading} onClick={() => setQuantizationTarget('image')}><Server size={12} /> Загрузить</button>
           <button className="btn justify-center" disabled={compatibilityLoading || prog.img.on} onClick={() => checkCompatibility('image', true)}>
             {compatibilityLoading ? <Loader2 size={12} className="animate-spin" /> : <ScanSearch size={12} />} Проверить
           </button>
@@ -1570,7 +1572,7 @@ function AiModelsPanel() {
             </div>
             {prog.llm.on && <ProgressBar p={prog.llm.p} stage={prog.llm.stage} />}
             <div className="flex gap-1.5">
-              <button className="btn flex-1 justify-center" disabled={prog.llm.on || compatibilityLoading} onClick={loadLlm}><Server size={12} /> Загрузить</button>
+              <button className="btn flex-1 justify-center" disabled={prog.llm.on || compatibilityLoading} onClick={() => setQuantizationTarget('llm')}><Server size={12} /> Загрузить</button>
               <button className="btn justify-center" disabled={compatibilityLoading || prog.llm.on} onClick={() => checkCompatibility('llm', true)}>
                 {compatibilityLoading ? <Loader2 size={12} className="animate-spin" /> : <ScanSearch size={12} />} Проверить
               </button>
@@ -1606,6 +1608,18 @@ function AiModelsPanel() {
       </div>
     </Group>
 
+
+    <QuantizationDialog
+      open={quantizationTarget !== null}
+      modelName={quantizationTarget === 'image' ? modelNameOf(cfg.modelPath || cfg.modelId) : modelNameOf(cfg.llmPath || 'VN_LLM_PATH')}
+      onClose={() => setQuantizationTarget(null)}
+      onSelect={mode => {
+        const target = quantizationTarget;
+        setQuantizationTarget(null);
+        if (target === 'image') void loadImg(mode);
+        else if (target === 'llm') void loadLlm(mode);
+      }}
+    />
 
     {compatibilityOpen && (
       <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={() => setCompatibilityOpen(false)}>
