@@ -573,8 +573,8 @@ def build_compatibility_report(
                 reasons.append("Недостаточно свободной оперативной памяти для CPU-запуска Diffusers-модели.")
 
     if model.get("exists") and model.get("size_gb") is not None:
-        storage_free = ((hardware.get("storage") or {}).get("free_gb") or 0)
-        if storage_free and storage_free < 1:
+        storage_free = (hardware.get("storage") or {}).get("free_gb")
+        if storage_free is not None and storage_free < 1:
             warnings.append("На диске почти не осталось свободного места для временных файлов и offload.")
 
     if not reasons and status == "ready":
