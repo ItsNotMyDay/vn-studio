@@ -548,7 +548,8 @@ def run_generate(req: GenReq, job: dict):
     if pipe is None:
         raise RuntimeError("Model is not loaded")
     seed = req.seed if req.seed >= 0 else int.from_bytes(os.urandom(4), "little") % (2 ** 31)
-    gen_device = "cpu" if strategy in ("sequential_offload", "model_offload") else STATE.get("device", "cpu")
+    runtime_device = STATE.get("device", "cpu")
+    gen_device = "cpu" if strategy in ("sequential_offload", "model_offload") or runtime_device in ("cpu", "mps") else runtime_device
     generator = torch.Generator(device=gen_device).manual_seed(seed)
     total = max(1, req.steps)
 
@@ -663,7 +664,9 @@ def _llm_max_memory(compatibility: dict) -> Optional[dict]:
     max_memory = {}
     for accelerator in hardware.get("accelerators") or []:
         if accelerator.get("backend") == "cuda":
-            free = accelerator.get("free_vram_gb") or accelerator.get("total_vram_gb")
+            free = accelerator.get("free_vram_gb")
+            if free is None:
+                free = accelerator.get("total_vram_gb")
             if free:
                 max_memory[int(accelerator.get("index", 0))] = f"{max(1, int(free * 0.78))}GiB"
     ram = memory.get("ram_available_gb")
@@ -723,8 +726,9 @@ def load_llm(path: str):
             if max_memory:
                 kwargs["max_memory"] = max_memory
     elif device in ("mps", "xpu"):
-        if kwargs["low_cpu_mem_usage"]:
-            kwargs["device_map"] = "auto"
+        # Load in host RAM and transfer explicitly; auto device maps are not
+        # equally reliable across Apple Metal and Intel XPU environments.
+        pass
     elif kwargs["low_cpu_mem_usage"]:
         kwargs["device_map"] = "cpu"
 
