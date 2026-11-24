@@ -177,8 +177,8 @@ export function StagePreview() {
             const [cid, key] = k.split('.');
             const c = s.project.characters.find(c => c.id === cid);
             return (
-              <span key={k} className="chip !text-[10px]" style={{ borderColor: `${c?.color}66`, color: c?.color }}>
-                {c?.name}.{key} <b>{String(v)}</b>
+              <span key={k} className="chip !text-[10px]" style={{ borderColor: `${c?.color ?? '#f4ead8'}66`, color: c?.isNarrator ? '#f4ead8' : c?.color }}>
+                {c?.isNarrator ? 'GLOBAL' : c?.name ?? cid}.{key} <b>{String(v)}</b>
               </span>
             );
           })}
