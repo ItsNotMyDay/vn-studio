@@ -46,8 +46,11 @@ export function loadAiSettings(): AiSettings {
     if (raw) {
       const saved = JSON.parse(raw);
       if (saved && typeof saved === 'object') {
-        const { serverToken: _legacyServerToken, ...settings } = saved;
-        return { ...AI_DEFAULT, ...settings };
+        if (Object.prototype.hasOwnProperty.call(saved, 'serverToken')) {
+          delete saved.serverToken;
+          try { localStorage.setItem('vn-studio-ai', JSON.stringify(saved)); } catch {}
+        }
+        return { ...AI_DEFAULT, ...saved };
       }
     }
   } catch {}
