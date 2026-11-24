@@ -86,6 +86,30 @@ class CompatibilityTests(unittest.TestCase):
             self.assertFalse(report["can_load"])
             self.assertEqual(report["status"], "blocked")
 
+    def test_detects_onnx_as_unsupported_instead_of_transformers(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "config.json").write_text(
+                json.dumps({"model_type": "llama", "architectures": ["LlamaForCausalLM"]}),
+                encoding="utf-8",
+            )
+            (root / "model.onnx").write_bytes(b"onnx-weights")
+            model = inspect_local_model(temp, "llm")
+            self.assertEqual(model["format"], "ONNX")
+            self.assertFalse(model["architecture_supported"])
+
+    def test_does_not_claim_cpu_fallback_for_prequantized_model(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self._make_llm(root, {
+                "model_type": "llama",
+                "architectures": ["LlamaForCausalLM"],
+                "quantization_config": {"quant_method": "gptq"},
+            })
+            report = build_compatibility_report(temp, "llm", fake_hardware(64))
+            self.assertFalse(report["can_load"])
+            self.assertEqual(report["status"], "blocked")
+
 
 if __name__ == "__main__":
     unittest.main()
