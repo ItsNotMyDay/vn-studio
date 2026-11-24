@@ -311,7 +311,6 @@ export interface ModelCompatibilityReport {
   diagnostic_status?: 'ready' | 'warning' | 'unsupported' | 'blocked' | 'unknown';
   can_load: boolean;
   load_allowed?: boolean;
-  warnings?: string[];
   kind: LocalModelKind;
   model: any;
   hardware: any;
