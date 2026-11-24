@@ -10,3 +10,4 @@ pillow>=10.3
 rembg>=2.0.57
 onnxruntime>=1.18
 huggingface_hub>=0.30
+bitsandbytes>=0.46
