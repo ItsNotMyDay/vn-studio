@@ -18,7 +18,7 @@ export function QuantizationDialog({
     {
       mode: 'int4',
       title: 'INT4 · 4 бита (NF4)',
-      detail: 'Меньше расход видеопамяти. Требуется совместимый GPU и bitsandbytes.',
+      detail: 'Меньше расход видеопамяти. Требуется NVIDIA CUDA, accelerate и bitsandbytes.',
       hint: 'Наиболее экономный режим',
     },
     {
@@ -46,7 +46,7 @@ export function QuantizationDialog({
           </div>
           <button className="btn !px-2" onClick={onClose} aria-label="Закрыть"><X size={13} /></button>
         </div>
-        <div className="text-[11px] text-mute">Выберите точность весов для этой загрузки.</div>
+        <div className="text-[11px] text-mute">Выберите режим точности и расхода видеопамяти для этой загрузки.</div>
         <div className="space-y-2">
           {choices.map(choice => (
             <button
@@ -63,7 +63,7 @@ export function QuantizationDialog({
             </button>
           ))}
         </div>
-        <div className="text-[9px] text-mute">Для уже квантованных файлов исходный формат модели не меняется. Доступность INT4 зависит от архитектуры и оборудования.</div>
+        <div className="text-[9px] text-mute">Уже квантованные файлы не перекодируются повторно. Для некоторых архитектур INT4 недоступен; сервер сообщит об этом до завершения загрузки.</div>
       </div>
     </div>
   );
