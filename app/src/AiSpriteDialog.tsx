@@ -105,6 +105,9 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
 
   const generate = async (seed?: number, quantization?: LocalQuantizationMode) => {
     if (!c) return;
+    // React click handlers receive a MouseEvent. Never let that event become
+    // the seed passed to JSON.stringify in the generation request.
+    const requestedSeed = typeof seed === 'number' && Number.isFinite(seed) ? seed : undefined;
     setResult(null); setMessage(''); setProgress(0);
     try {
       setPhase('checking'); setStage('Проверка сервера…');
@@ -120,7 +123,7 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
       if (!sameModel) {
         if (!cfg.autoLoad) throw new Error('Автозагрузка отключена. Сначала загрузите выбранную модель вручную.');
         if (!quantization) {
-          setPendingLoadAction({ kind: 'generate', seed });
+          setPendingLoadAction({ kind: 'generate', seed: requestedSeed });
           setQuantizationOpen(true);
           setPhase('idle'); setStage(''); setMessage('Выберите режим загрузки локальной модели');
           return;
@@ -128,7 +131,7 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
         if (!await loadLocalModel(quantization)) return;
       }
       setPhase('generating'); setStage('Генерация спрайта…');
-      const useSeed = seed ?? (cfg.seed < 0 ? Math.floor(Math.random() * 2 ** 31) : cfg.seed);
+      const useSeed = requestedSeed ?? (cfg.seed < 0 ? Math.floor(Math.random() * 2 ** 31) : cfg.seed);
       const final = await runJob('/generate', {
         model_id: cfg.modelId,
         model_path: cfg.modelPath,
