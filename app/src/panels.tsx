@@ -1598,7 +1598,7 @@ function AiModelsPanel() {
                 <button className="btn btn-primary flex-1 justify-center" disabled={apiChecking} onClick={connectOpenAi}>
                   {apiChecking ? <Loader2 size={12} className="animate-spin" /> : <Server size={12} />} Проверить и подключить
                 </button>
-                <button className="btn" disabled={apiChecking} onClick={() => setAddMode('menu')}>Назад</button>
+                <button className="btn" disabled={apiChecking} onClick={() => setAddMode('choice')}>Назад</button>
               </div>
             </div>
           )}
