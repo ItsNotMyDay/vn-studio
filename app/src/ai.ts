@@ -228,6 +228,17 @@ async function openAiChat(endpoint: string, settings: OpenAiSettings, messages: 
   if (!result.reply) throw new Error('OpenAI API вернул пустой ответ');
   return result.reply;
 }
+
+export async function openAiTestConnection(endpoint: string, settings: OpenAiSettings): Promise<string> {
+  return openAiChat(
+    endpoint,
+    settings,
+    [{ role: 'user', content: 'Ответь одним словом: OK' }],
+    8,
+    0,
+  );
+}
+
 export interface AiHealth {
   ok: boolean;
   device?: string;
