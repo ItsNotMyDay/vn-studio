@@ -507,9 +507,9 @@ def load_model(model_id: str, raw_path: str, job: dict, quantization_mode: str =
             job["stage"] = "Сборка INT4 pipeline"
             if not compatibility.get("hardware", {}).get("software", {}).get("accelerate", {}).get("available"):
                 raise RuntimeError("Для INT4-квантования Diffusers требуется пакет accelerate.")
-            # Diffusers BitsAndBytes accepts explicit placement strategies (cuda/balanced/cpu), not Transformers-style "auto".
-            # This app currently targets a single selected CUDA device for INT4 loading.
-            pipe = _fp(pipe_cls, path, dtype=torch.float16, device_map="cuda", **kw)
+            # Assemble without a forced device_map. The VRAM-aware placement
+            # below decides between full-GPU execution and model CPU offload.
+            pipe = _fp(pipe_cls, path, dtype=torch.float16, **kw)
             quant = "int4-nf4"
         except Exception as exc:
             raise RuntimeError(
@@ -527,10 +527,7 @@ def load_model(model_id: str, raw_path: str, job: dict, quantization_mode: str =
         pipe = _fp(pipe_cls, path, dtype="auto", **explicit)
         quant = "none"
     job["progress"] = 0.88
-    if device == "cuda" and quant == "int4-nf4":
-        # The pipeline was placed by Accelerate's device_map during from_pretrained.
-        strategy = "auto_device_map"
-    elif device == "cuda":
+    if device == "cuda":
         model_weight_bytes = int(((compatibility.get("model") or {}).get("weight_bytes") or 0))
         estimated_memory_pressure = (
             not profile_is_reliable
@@ -562,7 +559,10 @@ def load_model(model_id: str, raw_path: str, job: dict, quantization_mode: str =
         job["stage"] = "Placing pipeline on " + device
         pipe.to(device)
         strategy = "cpu" if device == "cpu" else "full_" + device
-    for fn in ("enable_vae_slicing", "enable_vae_tiling", "enable_attention_slicing"):
+    # VAE slicing/tiling are memory safeguards. Do not enable attention slicing
+    # unconditionally: modern PyTorch SDPA is already efficient, and combining
+    # both can cause severe inference slowdowns.
+    for fn in ("enable_vae_slicing", "enable_vae_tiling"):
         try:
             getattr(pipe, fn)()
         except Exception:
