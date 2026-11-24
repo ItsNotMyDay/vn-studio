@@ -213,6 +213,7 @@ class LoadReq(BaseModel):
 
 class GenReq(BaseModel):
     model_id: str = MODEL_ID_DEFAULT
+    model_path: Optional[str] = None
     quantization: Literal["int4", "fp16", "none"] = "none"
     prompt: str
     negative_prompt: str = ""
@@ -439,7 +440,7 @@ def load_model(model_id: str, raw_path: str, job: dict, quantization_mode: str =
     device, vram, gpu_name = cuda_info()
     profile = compatibility.get("profile") or {}
     planned_device = profile.get("device") if profile_is_reliable else None
-    if planned_device == "cpu" and device != "cpu":
+    if planned_device == "cpu" and device != "cpu" and quantization_mode != "int4":
         gpu_name = f"CPU fallback (GPU detected: {gpu_name})"
         device, vram = "cpu", 0.0
     if quantization_mode not in ("int4", "fp16", "none"):
@@ -571,6 +572,30 @@ def load_model(model_id: str, raw_path: str, job: dict, quantization_mode: str =
                      device=device, strategy=strategy, quant=quant, compatibility=compatibility)
     job["progress"] = 1.0
     job["stage"] = f"Ready | {quant} | {strategy}"
+
+def _ensure_image_model_for_request(req, job: dict, force_quantization: bool = False):
+    requested_path = resolve_path(getattr(req, "model_path", None) or "", req.model_id)
+    requested_mode = {"int4": "int4-nf4", "fp16": "fp16", "none": "none"}.get(req.quantization, req.quantization)
+    with LOCK:
+        same_model = (
+            STATE["loaded"]
+            and STATE.get("model_id") == req.model_id
+            and os.path.normcase(os.path.abspath(STATE.get("path") or "")) == os.path.normcase(os.path.abspath(requested_path))
+        )
+        same_mode = STATE.get("quant") == requested_mode
+        if same_model and (not force_quantization or same_mode):
+            return
+        STATE.update(loaded=False, pipe=None, strategy=None, quant=None, error=None)
+
+    import gc
+    gc.collect()
+    try:
+        import torch
+        torch.cuda.empty_cache()
+    except Exception:
+        pass
+    load_model(req.model_id, requested_path, job, req.quantization)
+
 
 def run_generate(req: GenReq, job: dict):
     import torch
@@ -1061,7 +1086,7 @@ def worker():
                 if kind == "download":
                     job["result"] = _download_hf_model(job["req"], job)
                 elif kind == "load":
-                    load_model(job["req"].model_id, job["req"].model_path or "", job, job["req"].quantization)
+                    _ensure_image_model_for_request(job["req"], job, force_quantization=True)
                 elif kind == "llm_load":
                     _llm_load_with_progress(job)
                 elif kind in ("llm_chat", "llm_suggest"):
@@ -1083,8 +1108,7 @@ def worker():
                     job["progress"] = 1.0
                     job["stage"] = "Done"
                 else:
-                    if not STATE["loaded"]:
-                        load_model(job["req"].model_id, job["req"].model_path or MODEL_PATH_DEFAULT, job, job["req"].quantization)
+                    _ensure_image_model_for_request(job["req"], job)
                     run_generate(job["req"], job)
                 with LOCK:
                     job["state"] = "cancelled" if job.get("cancel") else "done"
