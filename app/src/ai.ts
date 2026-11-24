@@ -2,6 +2,8 @@ import type { Character } from './store';
 
 /* ================================ настройки ================================ */
 
+export type LocalQuantizationMode = 'int4' | 'fp16' | 'none';
+
 export interface AiSettings {
   endpoint: string;
   modelId: string;
@@ -375,6 +377,7 @@ export async function aiLoadJob(
   endpoint: string,
   modelId: string,
   modelPath: string,
+  quantization: LocalQuantizationMode = 'none',
   onProgress?: (p: number, stage: string) => void,
   signal?: AbortSignal,
 ): Promise<JobState> {
@@ -382,7 +385,7 @@ export async function aiLoadJob(
   const r = await jsonFetch(`${base}/model/load`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model_id: modelId, model_path: modelPath }),
+    body: JSON.stringify({ model_id: modelId, model_path: modelPath, quantization }),
   }, 20000);
   if (!r.job_id) throw new Error('сервер не вернул job_id');
   const final = await aiPollJob(base, r.job_id, j => {
@@ -420,6 +423,7 @@ export async function llmHealth(endpoint: string): Promise<{ loaded: boolean; pa
 export async function llmLoadJob(
   endpoint: string,
   modelPath: string | null,
+  quantization: LocalQuantizationMode = 'none',
   onProgress?: (p: number, stage: string) => void,
   signal?: AbortSignal,
 ): Promise<{ ok: boolean; device?: string; error?: string }> {
@@ -427,7 +431,7 @@ export async function llmLoadJob(
   const r = await jsonFetch(`${base}/llm/load`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model_path: modelPath }),
+    body: JSON.stringify({ model_path: modelPath, quantization }),
   }, 20000);
   if (r.ok && !r.job_id) return { ok: true, device: r.device };
   if (!r.job_id) return { ok: false, error: 'сервер не вернул job_id' };
