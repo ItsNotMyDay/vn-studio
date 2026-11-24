@@ -2,8 +2,10 @@ import json
 import os
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
+import compatibility as compatibility_module
 from compatibility import build_compatibility_report, inspect_local_model
 
 
@@ -100,6 +102,76 @@ class CompatibilityTests(unittest.TestCase):
             model = inspect_local_model(temp, "llm")
             self.assertEqual(model["format"], "ONNX")
             self.assertFalse(model["architecture_supported"])
+
+    def test_allows_auto_map_for_native_qwen3_architecture_without_remote_code(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self._make_llm(root, {
+                "model_type": "qwen3",
+                "architectures": ["Qwen3ForCausalLM"],
+                "auto_map": {"AutoModelForCausalLM": "modeling_qwen3.Qwen3ForCausalLM"},
+            })
+            model = inspect_local_model(temp, "llm")
+            self.assertTrue(model["architecture_supported"])
+            self.assertFalse(model["custom_code_required"])
+            self.assertTrue(model["custom_code_present"])
+
+    def test_unknown_custom_code_remains_blocked(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self._make_llm(root, {
+                "model_type": "not_a_builtin_model",
+                "architectures": ["NotABuiltinForCausalLM"],
+                "auto_map": {"AutoModelForCausalLM": "modeling_custom.CustomModel"},
+            })
+            model = inspect_local_model(temp, "llm")
+            self.assertFalse(model["architecture_supported"])
+            self.assertTrue(model["custom_code_required"])
+
+    def test_large_14b_style_llm_can_use_four_bit_gpu_profile(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self._make_llm(root, {"model_type": "qwen3", "architectures": ["Qwen3ForCausalLM"]})
+            hardware = fake_hardware(64)
+            vram = 12 * 1024 ** 3
+            hardware["accelerators"] = [{
+                "backend": "cuda", "index": 0, "name": "Test GPU",
+                "total_vram_bytes": vram, "free_vram_bytes": vram,
+                "total_vram_gb": 12, "free_vram_gb": 12, "bf16": True,
+            }]
+            hardware["software"]["bitsandbytes"] = {"available": True, "version": "test"}
+            with mock.patch.object(compatibility_module, "_measure_model", return_value={
+                "size_bytes": 28 * 1024 ** 3, "weight_bytes": 28 * 1024 ** 3,
+                "size_gb": 28, "weight_gb": 28, "weight_files": 1,
+                "gguf_files": 0, "onnx_files": 0,
+            }):
+                report = build_compatibility_report(temp, "llm", hardware)
+            self.assertTrue(report["can_load"])
+            self.assertEqual(report["status"], "ready")
+            self.assertEqual(report["profile"]["quantization"], "4bit-nf4")
+
+    def test_large_diffusers_pipeline_is_not_blocked_by_conservative_estimate(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "model_index.json").write_text(json.dumps({"_class_name": "QwenImagePipeline"}), encoding="utf-8")
+            (root / "transformer").mkdir()
+            (root / "transformer" / "diffusion_pytorch_model.safetensors").write_bytes(b"weights" * 1024)
+            hardware = fake_hardware(64)
+            vram = 24 * 1024 ** 3
+            hardware["accelerators"] = [{
+                "backend": "cuda", "index": 0, "name": "Test GPU",
+                "total_vram_bytes": vram, "free_vram_bytes": vram,
+                "total_vram_gb": 24, "free_vram_gb": 24, "bf16": True,
+            }]
+            with unittest.mock.patch.object(compatibility_module, "_measure_model", return_value={
+                "size_bytes": 20 * 1024 ** 3, "weight_bytes": 20 * 1024 ** 3,
+                "size_gb": 20, "weight_gb": 20, "weight_files": 1,
+                "gguf_files": 0, "onnx_files": 0,
+            }):
+                report = build_compatibility_report(temp, "image", hardware)
+            self.assertTrue(report["can_load"])
+            self.assertEqual(report["status"], "warning")
+            self.assertTrue(report["profile"]["offload"])
 
     def test_does_not_claim_cpu_fallback_for_prequantized_model(self):
         with tempfile.TemporaryDirectory() as temp:
