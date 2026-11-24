@@ -205,6 +205,7 @@ def _measure_model(path: Path) -> dict[str, Any]:
     weight_bytes = 0
     weight_files = 0
     gguf_files = 0
+    onnx_files = 0
     for root, dirs, files in os.walk(path):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
         for filename in files:
@@ -219,6 +220,8 @@ def _measure_model(path: Path) -> dict[str, Any]:
                 weight_files += 1
                 if filename.lower().endswith((".gguf", ".ggml")):
                     gguf_files += 1
+                if filename.lower().endswith(".onnx"):
+                    onnx_files += 1
     return {
         "size_bytes": total_bytes,
         "weight_bytes": weight_bytes,
@@ -226,6 +229,7 @@ def _measure_model(path: Path) -> dict[str, Any]:
         "weight_gb": _gb(weight_bytes),
         "weight_files": weight_files,
         "gguf_files": gguf_files,
+        "onnx_files": onnx_files,
     }
 
 
@@ -263,6 +267,18 @@ def inspect_local_model(model_path: str, requested_kind: str) -> dict[str, Any]:
         tokenizer_present = (path / "tokenizer").exists()
         architecture_supported = True
         architecture_note = None
+    elif size["onnx_files"] and size["weight_files"] == size["onnx_files"]:
+        actual_kind = "unknown"
+        architectures = []
+        model_type = "onnx"
+        adapter = None
+        multimodal = False
+        quantized = False
+        format_name = "ONNX"
+        processor_present = False
+        tokenizer_present = False
+        architecture_supported = False
+        architecture_note = "Обнаружены ONNX-веса, но ONNX Runtime для LLM/Diffusers ещё не подключён."
     elif size["gguf_files"]:
         actual_kind = "llm"
         architectures = []
@@ -479,7 +495,7 @@ def build_compatibility_report(
                     profile.update(strategy="gpu_cpu_offload", offload=True)
                     status = "warning"
                     warnings.append("Модель не помещается целиком в VRAM; потребуется автоматическое размещение частей модели в RAM.")
-                elif ram_free >= estimated_cpu_bytes * 1.25:
+                elif not model.get("quantized") and ram_free >= estimated_cpu_bytes * 1.25:
                     profile.update(device="cpu", dtype="float32", strategy="cpu_fp32", device_map="cpu",
                                    quantization="none")
                     status = "warning"
@@ -498,7 +514,7 @@ def build_compatibility_report(
                     else:
                         status = "blocked"
                         reasons.append("Недостаточно RAM для загрузки модели на обнаруженный ускоритель без device-map.")
-                elif ram_free >= estimated_cpu_bytes * 1.25:
+                elif not model.get("quantized") and ram_free >= estimated_cpu_bytes * 1.25:
                     profile.update(device="cpu", dtype="float32", strategy="cpu_fp32", device_map="cpu")
                     status = "warning"
                     warnings.append("Модель будет работать на CPU. Генерация может быть очень медленной.")
