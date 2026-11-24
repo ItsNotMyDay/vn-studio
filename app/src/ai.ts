@@ -245,6 +245,7 @@ export interface JobState {
   stage: string;
   message?: string;
   partial?: string;
+  warnings?: string[];
   result?: { image_base64: string; mime: string; seed: number; width: number; height: number; model_id: string }
     | { reply: string }
     | { suggestions: { text: string; tone?: string }[]; raw?: string }
@@ -307,7 +308,10 @@ export type LocalModelKind = 'llm' | 'image';
 
 export interface ModelCompatibilityReport {
   status: 'ready' | 'warning' | 'unsupported' | 'blocked' | 'unknown';
+  diagnostic_status?: 'ready' | 'warning' | 'unsupported' | 'blocked' | 'unknown';
   can_load: boolean;
+  load_allowed?: boolean;
+  warnings?: string[];
   kind: LocalModelKind;
   model: any;
   hardware: any;
@@ -382,8 +386,10 @@ export async function aiLoadJob(
     body: JSON.stringify({ model_id: modelId, model_path: modelPath }),
   }, 20000);
   if (!r.job_id) throw new Error('сервер не вернул job_id');
-  const final = await aiPollJob(base, r.job_id, j => onProgress?.(j.progress ?? 0, j.stage ?? ''),
-    signal ?? new AbortController().signal, 30 * 60 * 1000, 500);
+  const final = await aiPollJob(base, r.job_id, j => {
+    const warning = j.warnings?.[0] ? '⚠ ' + j.warnings[0] + ' · ' : '';
+    onProgress?.(j.progress ?? 0, warning + (j.stage ?? ''));
+  }, signal ?? new AbortController().signal, 30 * 60 * 1000, 500);
   if (final.state !== 'done') throw new Error(final.message || final.state);
   return final;
 }
@@ -426,8 +432,10 @@ export async function llmLoadJob(
   }, 20000);
   if (r.ok && !r.job_id) return { ok: true, device: r.device };
   if (!r.job_id) return { ok: false, error: 'сервер не вернул job_id' };
-  const final = await aiPollJob(base, r.job_id, j => onProgress?.(j.progress ?? 0, j.stage ?? ''),
-    signal ?? new AbortController().signal, 30 * 60 * 1000, 400);
+  const final = await aiPollJob(base, r.job_id, j => {
+    const warning = j.warnings?.[0] ? '⚠ ' + j.warnings[0] + ' · ' : '';
+    onProgress?.(j.progress ?? 0, warning + (j.stage ?? ''));
+  }, signal ?? new AbortController().signal, 30 * 60 * 1000, 400);
   if (final.state !== 'done') return { ok: false, error: final.message || final.state };
   const h = await llmHealth(endpoint);
   return { ok: true, device: h.device ?? undefined };
