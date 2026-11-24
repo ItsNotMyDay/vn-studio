@@ -494,6 +494,29 @@ export async function llmChat(
   return res.reply;
 }
 
+const SUGGESTION_EMOTIONS: Record<string, { label: string; guidance: string }> = {
+  neutral: {
+    label: 'спокойствие',
+    guidance: 'говори ровно и сдержанно, без сильной радости, раздражения, печали или удивления',
+  },
+  smile: {
+    label: 'улыбка',
+    guidance: 'передай дружелюбие, теплоту и лёгкую радость; допустимы мягкий юмор и доброжелательная игривость, но не злость и не уныние',
+  },
+  angry: {
+    label: 'злость',
+    guidance: 'передай раздражение, гнев или напряжение через резкость, короткие фразы и твёрдую интонацию; не смягчай реплику до дружелюбной или весёлой',
+  },
+  sad: {
+    label: 'грусть',
+    guidance: 'передай печаль, подавленность или уязвимость через тихую, сдержанную интонацию; не превращай реплику в весёлую, дерзкую или воодушевлённую',
+  },
+  surprised: {
+    label: 'удивление',
+    guidance: 'передай неожиданность, изумление или растерянность через реакцию, вопросы, паузы или уточнения; не подменяй удивление злостью или радостью',
+  },
+};
+
 export async function llmSuggest(
   endpoint: string,
   context: any,
@@ -504,9 +527,23 @@ export async function llmSuggest(
   signal?: AbortSignal,
   remote?: OpenAiSettings,
 ): Promise<{ suggestions: LlmSuggestion[] }> {
+  const currentNode = context?.current_node ?? {};
+  const requestedEmotion = typeof currentNode.emotion === 'string' ? currentNode.emotion : 'neutral';
+  const emotion = Object.prototype.hasOwnProperty.call(SUGGESTION_EMOTIONS, requestedEmotion) ? requestedEmotion : 'neutral';
+  const selectedMood = SUGGESTION_EMOTIONS[emotion];
+  const suggestionContext = {
+    ...context,
+    current_node: { ...currentNode, emotion },
+  };
+  const moodInstruction = [
+    `ОБЯЗАТЕЛЬНОЕ НАСТРОЕНИЕ КАЖДОЙ РЕПЛИКИ: ${selectedMood.label} (expression=${emotion}).`,
+    `Передавай его так: ${selectedMood.guidance}.`,
+    'Все варианты должны сохранять именно это настроение. Различай варианты формулировкой, ритмом и речевым приёмом только внутри выбранного настроения.',
+    'Не предлагай альтернативные эмоции и не делай один вариант весёлым, а другой грустным или злым. Поле tone может описывать только стиль внутри заданного настроения.',
+  ].join('\n');
   if (remote) {
-    const system = 'Ты — опытный сценарист визуальных новелл. Предложи несколько живых реплик на русском языке с учётом характера персонажа, эмоции и контекста. Верни только валидный JSON без Markdown: {"suggestions":[{"text":"...","tone":"..."}]}';
-    const user = 'Количество вариантов: ' + count + '. Контекст:\n' + JSON.stringify(context, null, 2);
+    const system = 'Ты — опытный сценарист визуальных новелл. Пиши живые, естественные реплики на русском языке. Выбранное настроение — жёсткое ограничение: каждая предложенная реплика должна ему соответствовать; не меняй его ради разнообразия. Учитывай характер персонажа и контекст. Верни только валидный JSON без Markdown: {"suggestions":[{"text":"...","tone":"..."}]}.';
+    const user = 'Количество вариантов: ' + count + '.\n' + moodInstruction + '\nКонтекст:\n' + JSON.stringify(suggestionContext, null, 2);
     const raw = await openAiChat(endpoint, remote, [{ role: 'system', content: system }, { role: 'user', content: user }], maxTokens, temp, signal);
     const match = raw.match(/\{[\s\S]*\}/);
     if (!match) throw new Error('OpenAI API не вернул JSON с вариантами');
@@ -518,7 +555,7 @@ export async function llmSuggest(
   const r = await jsonFetch(`${base}/llm/suggest`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ context, count, max_tokens: maxTokens, temperature: temp }),
+    body: JSON.stringify({ context: suggestionContext, count, max_tokens: maxTokens, temperature: temp }),
   }, 20000);
   if (!r.job_id) throw new Error('сервер не вернул job_id');
   onJobId?.(r.job_id);
