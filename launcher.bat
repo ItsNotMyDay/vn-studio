@@ -37,17 +37,7 @@ set VN_EMBED_PATH=C:\models\e5-small
 if not defined VN_SERVER_HOST set "VN_SERVER_HOST=127.0.0.1"
 if not defined VN_SERVER_PORT set "VN_SERVER_PORT=8765"
 
-:: При сетевом доступе включаем общий bearer-токен.
-:: Не открывайте этот порт в интернет и используйте только доверенную локальную сеть.
-if /I not "%VN_SERVER_HOST%"=="127.0.0.1" if /I not "%VN_SERVER_HOST%"=="localhost" if not defined VN_SERVER_TOKEN (
-    echo Для сетевого доступа задайте общий токен, который нужно будет ввести в VN Studio на клиентских ПК.
-    set /p "VN_SERVER_TOKEN=Токен доступа к AI-серверу: "
-    if not defined VN_SERVER_TOKEN (
-        echo ОШИБКА: при сетевом доступе обязателен VN_SERVER_TOKEN.
-        pause
-        exit /b 1
-    )
-)
+:: Для сетевого доступа разрешайте порт только в доверенной частной сети Windows.
 
 :: Запуск AI-сервера ИЗ ПАПКИ ai-server (важно!)
 echo Запуск AI-сервера... >> "%ROOT_DIR%\launcher.log"
