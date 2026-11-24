@@ -41,7 +41,7 @@ export function AiBackgroundDialog({ open, onClose }: { open: boolean; onClose: 
   const [progress, setProgress] = useState(0);
   const [stage, setStage] = useState('');
   const [message, setMessage] = useState('');
-  const [health, setHealth] = useState<{ ok: boolean; device?: string; model_loaded?: boolean }>({ ok: false });
+  const [health, setHealth] = useState<{ ok: boolean; device?: string; model_loaded?: boolean; model_id?: string; path?: string | null }>({ ok: false });
   const [result, setResult] = useState<{ url: string; blob: Blob; seed: number } | null>(null);
   const [usedSeed, setUsedSeed] = useState(0);
   const [quantizationOpen, setQuantizationOpen] = useState(false);
@@ -91,7 +91,12 @@ export function AiBackgroundDialog({ open, onClose }: { open: boolean; onClose: 
       if (!aliveRef.current) return;
       setHealth(h);
       if (!h.ok) throw new Error(`Сервер генерации недоступен (${endpoint}). Запустите ai-server/server.py.`);
-      if (!h.model_loaded && !quantization) {
+      const loadedPath = (h.path || '').replace(/\\\\/g, '/').toLowerCase();
+      const selectedPath = (cfg.modelPath || '').replace(/\\\\/g, '/').toLowerCase();
+      const sameModel = !!h.model_loaded
+        && (!h.model_id || h.model_id === cfg.modelId)
+        && (!selectedPath || !loadedPath || loadedPath === selectedPath);
+      if (!sameModel && !quantization) {
         setPendingSeed(seed);
         setQuantizationOpen(true);
         setPhase('idle'); setStage(''); setMessage('Выберите режим загрузки локальной модели');
@@ -100,6 +105,7 @@ export function AiBackgroundDialog({ open, onClose }: { open: boolean; onClose: 
       const useSeed = seed ?? (cfg.seed < 0 ? Math.floor(Math.random() * 2 ** 31) : cfg.seed);
       const jobId = await aiStartJob(endpoint, '/generate', {
         model_id: cfg.modelId,
+        model_path: cfg.modelPath,
         quantization: quantization ?? 'none',
         prompt: fullPrompt(),
         negative_prompt: cfg.negative,
