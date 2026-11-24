@@ -1018,29 +1018,95 @@ export function Inspector() {
             {node.type === 'entity' && (
               <>
                 <div className="flex gap-1.5">
-                  <button
-                    className="btn flex-1 justify-center"
+                  <button className="btn flex-1 justify-center"
                     style={(d.entityKind ?? 'character') !== 'sprite' ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : {}}
-                    onClick={() => s.updateNodeData(node.id, { entityKind: 'character' })}
-                  >
-                    Персонаж
-                  </button>
-                  <button
-                    className="btn flex-1 justify-center"
+                    onClick={() => s.updateNodeData(node.id, { entityKind: 'character' })}>Персонаж</button>
+                  <button className="btn flex-1 justify-center"
                     style={(d.entityKind ?? 'character') === 'sprite' ? { borderColor: '#2ee6a8', color: '#2ee6a8' } : {}}
-                    onClick={() => s.updateNodeData(node.id, { entityKind: 'sprite' })}
-                  >
-                    Спрайт
-                  </button>
+                    onClick={() => s.updateNodeData(node.id, { entityKind: 'sprite', spriteType: d.spriteType ?? 'asset' })}>Спрайт</button>
                 </div>
 
                 {(d.entityKind ?? 'character') === 'sprite' ? (
-                  <Field label="Спрайт-ассет">
-                    <select className="select" value={d.spriteId ?? ''} onChange={e => s.updateNodeData(node.id, { spriteId: e.target.value })}>
-                      <option value="">— не выбран —</option>
-                      {s.project.sprites.map(sp => <option key={sp.id} value={sp.id}>{sp.name}</option>)}
-                    </select>
-                  </Field>
+                  <>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {(['text', 'geometry', 'asset'] as const).map(type => (
+                        <button key={type} className="btn justify-center !px-1.5"
+                          style={(d.spriteType ?? 'asset') === type ? { borderColor: '#2ee6a8', color: '#2ee6a8' } : {}}
+                          onClick={() => s.updateNodeData(node.id, {
+                            spriteType: type,
+                            entityId: type === 'asset' ? d.entityId : (d.entityId || node.id),
+                            opacity: d.opacity ?? 100,
+                          })}>
+                          {type === 'text' ? 'Текст' : type === 'geometry' ? 'Геометрия' : 'Спрайт'}
+                        </button>
+                      ))}
+                    </div>
+
+                    {(d.spriteType ?? 'asset') === 'asset' && (
+                      <Field label="Спрайт-ассет">
+                        <select className="select" value={d.spriteId ?? ''} onChange={e => s.updateNodeData(node.id, { spriteId: e.target.value })}>
+                          <option value="">— не выбран —</option>
+                          {s.project.sprites.map(sp => <option key={sp.id} value={sp.id}>{sp.name}</option>)}
+                        </select>
+                      </Field>
+                    )}
+
+                    {(d.spriteType === 'text' || d.spriteType === 'geometry') && (
+                      <Field label="ID объекта (одинаковый для показа, перемещения и скрытия)">
+                        <input className="input font-mono" value={d.entityId ?? node.id}
+                          onChange={e => s.updateNodeData(node.id, { entityId: e.target.value })} />
+                      </Field>
+                    )}
+
+                    {d.spriteType === 'text' && (
+                      <>
+                        <Field label="Текст">
+                          <VariableTextarea value={d.text ?? ''} characters={s.project.characters}
+                            onChange={text => s.updateNodeData(node.id, { text })} />
+                        </Field>
+                        <div className="grid grid-cols-2 gap-2">
+                          <Field label="Цвет фона">
+                            <div className="flex gap-1.5 items-center">
+                              <input type="color" value={d.backgroundColor || '#0b0e15'}
+                                disabled={!d.backgroundColor}
+                                onChange={e => s.updateNodeData(node.id, { backgroundColor: e.target.value })} />
+                              <button className="btn !px-2" onClick={() => s.updateNodeData(node.id, { backgroundColor: d.backgroundColor ? '' : '#0b0e15' })}>
+                                {d.backgroundColor ? 'Без фона' : 'Выбрать'}
+                              </button>
+                            </div>
+                          </Field>
+                          <Field label="Цвет текста">
+                            <input type="color" value={d.textColor ?? '#f4ead8'} onChange={e => s.updateNodeData(node.id, { textColor: e.target.value })} />
+                          </Field>
+                        </div>
+                        <Slider label="Прозрачность" value={d.opacity ?? 100} min={0} max={100} unit="%" onChange={opacity => s.updateNodeData(node.id, { opacity })} />
+                      </>
+                    )}
+
+                    {d.spriteType === 'geometry' && (
+                      <>
+                        <Field label="Тип">
+                          <select className="select" value={d.geometryType ?? 'rectangle'} onChange={e => s.updateNodeData(node.id, { geometryType: e.target.value })}>
+                            <option value="line">Линия</option><option value="rectangle">Прямоугольник</option>
+                            <option value="triangle">Треугольник</option><option value="circle">Круг</option>
+                          </select>
+                        </Field>
+                        <div className="grid grid-cols-2 gap-2">
+                          <Field label="Контур"><input type="color" value={d.strokeColor ?? '#f4ead8'} onChange={e => s.updateNodeData(node.id, { strokeColor: e.target.value })} /></Field>
+                          <Field label="Заливка">
+                            <div className="flex gap-1.5 items-center">
+                              <input type="color" value={d.fillColor || '#39d5ff'} disabled={!d.fillColor}
+                                onChange={e => s.updateNodeData(node.id, { fillColor: e.target.value })} />
+                              <button className="btn !px-2" onClick={() => s.updateNodeData(node.id, { fillColor: d.fillColor ? '' : '#39d5ff' })}>
+                                {d.fillColor ? 'Без заливки' : 'Выбрать'}
+                              </button>
+                            </div>
+                          </Field>
+                        </div>
+                        <Slider label="Прозрачность" value={d.opacity ?? 100} min={0} max={100} unit="%" onChange={opacity => s.updateNodeData(node.id, { opacity })} />
+                      </>
+                    )}
+                  </>
                 ) : (
                   <>
                     <Field label="Персонаж">
@@ -1091,7 +1157,7 @@ export function Inspector() {
                   <Field label="Z-индекс"><input className="input" type="number" min={0} max={40} placeholder="авто" value={d.z ? Math.round(d.z) : ''} onChange={e => s.updateNodeData(node.id, { z: e.target.value === '' ? 0 : Number(e.target.value) })} /></Field>
                 </div>
                 <Slider label="Позиция X" value={Math.round(d.x ?? 50)} min={-20} max={120} unit="%" onChange={v => s.updateNodeData(node.id, { x: v })} />
-                <Slider label="Позиция Y (низ спрайта)" value={Math.round(d.y ?? 74)} min={-20} max={120} unit="%" onChange={v => s.updateNodeData(node.id, { y: v })} />
+                <Slider label="Позиция Y (низ объекта)" value={Math.round(d.y ?? 74)} min={-20} max={120} unit="%" onChange={v => s.updateNodeData(node.id, { y: v })} />
                 <Slider label="Размер" value={Math.round(d.scale ?? 100)} min={10} max={300} unit="%" onChange={v => s.updateNodeData(node.id, { scale: v })} />
                 <Slider label="Z-индекс" value={Math.round(d.z ?? 0)} min={0} max={40} unit={d.z ? '' : ' (авто)'} onChange={v => s.updateNodeData(node.id, { z: v })} />
                 <Slider label="Длительность эффекта" value={d.duration ?? 0.6} min={0.1} max={3} step={0.1} unit="с" onChange={v => s.updateNodeData(node.id, { duration: v })} />
@@ -1100,11 +1166,10 @@ export function Inspector() {
                   <Eye size={13} /> Показать на сцене
                 </button>
                 <div className="text-[11px] text-mute leading-snug">
-                  В предпросмотре сущность можно перетаскивать мышью и менять размер колесом или ручкой — значения пишутся прямо в эту ноду.
+                  Для текстовых и геометрических объектов повторяйте один и тот же ID в нодах показа, перемещения и скрытия. Размер и позицию можно настроить в предпросмотре.
                 </div>
               </>
             )}
-
             {node.type === 'pause' && (
               <>
                 <Field label="Секунды">
