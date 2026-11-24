@@ -1567,7 +1567,7 @@ function AiModelsPanel() {
           <>
             <div className="flex flex-wrap gap-1.5">
               <span className="chip" style={{ borderColor: llmH?.loaded ? '#9dff5766' : '#3a4666', color: llmH?.loaded ? '#9dff57' : '#8d97b5' }}>
-                {llmH?.loaded ? `${modelNameOf(llmH.path)} · ${llmH.device}` : 'не загружена'}
+                {llmH?.loaded ? `${modelNameOf(llmH.path)} · ${llmH.device} · ${llmH.quantization ?? 'точность не указана'}` : 'не загружена'}
               </span>
             </div>
             {prog.llm.on && <ProgressBar p={prog.llm.p} stage={prog.llm.stage} />}
