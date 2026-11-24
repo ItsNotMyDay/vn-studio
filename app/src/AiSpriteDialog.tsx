@@ -299,7 +299,7 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
 
             <div className="flex flex-wrap gap-4">
               <button className="flex items-center gap-2" onClick={() => patch({ transparent: !cfg.transparent })}>
-                <span className={`toggle ${cfg.transparent ? 'on' : ''}`} /><span className="text-[11px] text-mute">Изолировать на белом фоне</span>
+                <span className={`toggle ${cfg.transparent ? 'on' : ''}`} /><span className="text-[11px] text-mute">Прозрачный фон</span>
               </button>
               <button className="flex items-center gap-2" onClick={() => patch({ autoLoad: !cfg.autoLoad })}>
                 <span className={`toggle ${cfg.autoLoad ? 'on' : ''}`} /><span className="text-[11px] text-mute">Автозагрузка модели</span>
