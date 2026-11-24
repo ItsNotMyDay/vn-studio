@@ -10,7 +10,7 @@ import uuid
 import re
 import urllib.error
 import urllib.request
-from typing import Optional
+from typing import Optional, Literal
 
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
 if os.name != "nt":
@@ -197,7 +197,7 @@ def _llm_load_with_progress(job):
     t.start()
     try:
         with contextlib.redirect_stderr(buf):
-            ok = load_llm(job["req"].model_path or LLM_PATH_DEFAULT)
+            ok = load_llm(job["req"].model_path or LLM_PATH_DEFAULT, job["req"].quantization)
     finally:
         stop.set()
         t.join()
@@ -209,9 +209,11 @@ def _llm_load_with_progress(job):
 class LoadReq(BaseModel):
     model_id: str = MODEL_ID_DEFAULT
     model_path: Optional[str] = None
+    quantization: Literal["int4", "fp16", "none"] = "none"
 
 class GenReq(BaseModel):
     model_id: str = MODEL_ID_DEFAULT
+    quantization: Literal["int4", "fp16", "none"] = "none"
     prompt: str
     negative_prompt: str = ""
     width: int = 512
@@ -423,7 +425,7 @@ def _compatibility_warnings(report: dict) -> list[str]:
     return list(dict.fromkeys(warnings))
 
 
-def load_model(model_id: str, raw_path: str, job: dict):
+def load_model(model_id: str, raw_path: str, job: dict, quantization_mode: str = "none"):
     import torch
     from diffusers import DiffusionPipeline
 
@@ -440,6 +442,8 @@ def load_model(model_id: str, raw_path: str, job: dict):
     if planned_device == "cpu" and device != "cpu":
         gpu_name = f"CPU fallback (GPU detected: {gpu_name})"
         device, vram = "cpu", 0.0
+    if quantization_mode not in ("int4", "fp16", "none"):
+        raise ValueError(f"Неизвестный режим квантования: {quantization_mode}")
     if device == "cuda":
         torch.cuda.set_device(0)
         try:
@@ -447,13 +451,9 @@ def load_model(model_id: str, raw_path: str, job: dict):
             torch.backends.cudnn.allow_tf32 = True
         except Exception:
             pass
-        dtype = torch.float16
-    elif device == "mps":
-        dtype = torch.float16
-    elif device == "xpu":
-        dtype = torch.bfloat16 if hasattr(torch, "bfloat16") else torch.float32
-    else:
-        dtype = torch.float32
+    # "none" keeps the precision stored in the checkpoint; FP16 and INT4
+    # use explicit half-precision compute on supported accelerator paths.
+    dtype = torch.float16 if quantization_mode in ("int4", "fp16") else None
     index = read_index(path)
     pipe_cls = DiffusionPipeline
     cls_name = str(index.get("_class_name", ""))
@@ -480,52 +480,48 @@ def load_model(model_id: str, raw_path: str, job: dict):
     for name in undeclared:
         job["stage"] = f"Loading undeclared component: {name}"
         explicit[name] = load_component(path, name, index, dtype)
-    quant = None
+    quant = "none"
     pipe = None
-    planned_quant = profile.get("quantization") if profile_is_reliable else None
-    if device == "cuda" and planned_quant == "4bit-nf4":
+    if quantization_mode == "int4":
+        if device != "cuda":
+            raise RuntimeError("Режим INT4 сейчас поддерживается для локальной загрузки только через NVIDIA CUDA.")
         if not os.path.isdir(os.path.join(path, "transformer")):
-            raise RuntimeError("Диагностика выбрала 4-битный режим, но в Diffusers-модели нет компонента transformer. Автоматический запуск отменён.")
+            raise RuntimeError("Эта Diffusers-модель не содержит transformer, который можно загрузить в INT4.")
         try:
-            job["stage"] = "Quantizing transformer to 4-bit nf4"
-            job["progress"] = 0.2
             from diffusers import BitsAndBytesConfig as DBnB
+            from transformers import BitsAndBytesConfig as TBnB
+            job["stage"] = "Квантование transformer в INT4 (NF4)"
+            job["progress"] = 0.2
             t_cfg = DBnB(load_in_4bit=True, bnb_4bit_quant_type="nf4",
-                         bnb_4bit_compute_dtype=dtype, bnb_4bit_use_double_quant=True)
+                         bnb_4bit_compute_dtype=torch.float16, bnb_4bit_use_double_quant=True)
             kw = dict(explicit)
-            kw["transformer"] = load_component(path, "transformer", index, dtype, t_cfg)
-            job["progress"] = 0.5
-            job["stage"] = "Quantizing text encoder to 4-bit nf4"
-            try:
-                from transformers import BitsAndBytesConfig as TBnB
-                e_cfg = TBnB(load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_compute_dtype=dtype)
-                kw["text_encoder"] = load_component(path, "text_encoder", index, dtype, e_cfg)
-            except Exception:
-                pass
-            job["progress"] = 0.75
-            job["stage"] = "Assembling pipeline"
-            pipe = _fp(pipe_cls, path, dtype=dtype, **kw)
-            quant = "4bit-nf4"
-        except Exception as e:
-            try:
-                from diffusers import BitsAndBytesConfig as DBnB
-                t_cfg = DBnB(load_in_8bit=True)
-                kw = dict(explicit)
-                kw["transformer"] = load_component(path, "transformer", index, dtype, t_cfg)
-                pipe = _fp(pipe_cls, path, dtype=dtype, **kw)
-                quant = "8bit"
-            except Exception as fallback_error:
-                raise RuntimeError(
-                    "Не удалось применить рассчитанный 4/8-битный профиль; "
-                    "сервер не будет запускать более прожорливый FP16 режим. "
-                    + f"4-bit: {type(e).__name__}: {str(e)[:180]}; "
-                    + f"8-bit: {type(fallback_error).__name__}: {str(fallback_error)[:180]}"
-                ) from fallback_error
-    else:
-        job["stage"] = "Loading " + str(dtype).replace("torch.", "") + " pipeline"
+            kw["transformer"] = load_component(path, "transformer", index, torch.float16, t_cfg)
+            if os.path.isdir(os.path.join(path, "text_encoder")):
+                try:
+                    e_cfg = TBnB(load_in_4bit=True, bnb_4bit_quant_type="nf4",
+                                 bnb_4bit_compute_dtype=torch.float16)
+                    kw["text_encoder"] = load_component(path, "text_encoder", index, torch.float16, e_cfg)
+                except Exception as exc:
+                    job["warnings"].append("Текстовый энкодер оставлен в исходной точности: " + str(exc)[:180])
+            job["progress"] = 0.7
+            job["stage"] = "Сборка INT4 pipeline"
+            pipe = _fp(pipe_cls, path, dtype=torch.float16, **kw)
+            quant = "int4-nf4"
+        except Exception as exc:
+            raise RuntimeError(
+                "Не удалось загрузить Diffusers-модель в INT4. Проверьте совместимость transformer и bitsandbytes: "
+                + f"{type(exc).__name__}: {str(exc)[:300]}"
+            ) from exc
+    elif quantization_mode == "fp16":
+        job["stage"] = "Загрузка модели в FP16"
         job["progress"] = 0.4
-        pipe = _fp(pipe_cls, path, dtype=dtype, **explicit)
-        quant = "fp16" if dtype == torch.float16 else str(dtype).replace("torch.", "")
+        pipe = _fp(pipe_cls, path, dtype=torch.float16, **explicit)
+        quant = "fp16"
+    else:
+        job["stage"] = "Загрузка без дополнительного квантования (точность весов модели)"
+        job["progress"] = 0.4
+        pipe = _fp(pipe_cls, path, **explicit)
+        quant = "none"
     job["progress"] = 0.88
     if device == "cuda":
         model_weight_bytes = int(((compatibility.get("model") or {}).get("weight_bytes") or 0))
@@ -712,12 +708,14 @@ def _llm_max_memory(compatibility: dict) -> Optional[dict]:
     return max_memory or None
 
 
-def load_llm(path: str):
+def load_llm(path: str, quantization_mode: str = "none"):
     import torch
     from transformers import AutoTokenizer
 
     if not os.path.isdir(path):
         raise FileNotFoundError(f"LLM folder not found: {path}")
+    if quantization_mode not in ("int4", "fp16", "none"):
+        raise ValueError(f"Неизвестный режим квантования: {quantization_mode}")
 
     compatibility = build_compatibility_report(path, "llm")
     profile_is_reliable = _compatibility_profile_is_reliable(compatibility)
@@ -741,74 +739,83 @@ def load_llm(path: str):
 
     profile = dict(compatibility.get("profile") or {})
     if not profile_is_reliable:
-        # Ignore a pessimistic CPU-only default from a failed estimate. Attempt
-        # the runtime's native accelerator path first; actual allocation errors
-        # are reported by from_pretrained rather than guessed in advance.
         device, _, _ = cuda_info()
-        if device == "cuda":
-            try:
-                dtype_name = "bfloat16" if torch.cuda.is_bf16_supported() else "float16"
-            except Exception:
-                dtype_name = "float16"
-        elif device == "mps":
-            dtype_name = "float16"
-        elif device == "xpu":
-            dtype_name = "bfloat16" if hasattr(torch, "bfloat16") else "float32"
-        else:
-            dtype_name = "float32"
         strategy = "best_effort_" + device
-        profile.update(
-            device=device,
-            dtype=dtype_name,
-            strategy=strategy,
-            quantization="none",
-            offload=False,
-        )
     else:
         device = str(profile.get("device") or "cpu")
         strategy = str(profile.get("strategy") or "cpu_fp32")
-        dtype_name = str(profile.get("dtype") or "float32")
-    if dtype_name == "bfloat16" and hasattr(torch, "bfloat16"):
-        dtype = torch.bfloat16
-    elif dtype_name == "float16":
-        dtype = torch.float16
-    else:
-        dtype = torch.float32
 
-    kwargs = {"torch_dtype": dtype, "low_cpu_mem_usage": bool(compatibility.get("hardware", {}).get("software", {}).get("accelerate", {}).get("available"))}
+    if quantization_mode == "int4":
+        detected_device, _, _ = cuda_info()
+        if detected_device != "cuda":
+            raise RuntimeError("Режим INT4 сейчас поддерживается для локальной LLM только на NVIDIA CUDA.")
+        device = "cuda"
+        strategy = "cuda_int4_nf4"
+
+    use_prequantized = bool(model_info.get("quantized"))
+    if quantization_mode == "int4" and use_prequantized:
+        # A GPTQ/AWQ/BitsAndBytes checkpoint already carries its own quantization.
+        # Do not attempt to quantize it a second time.
+        applied_quantization = "pre-quantized"
+    else:
+        applied_quantization = quantization_mode
+
+    dtype = torch.float16 if quantization_mode in ("int4", "fp16") else None
+    compute_dtype = torch.float16
+    if quantization_mode == "int4":
+        try:
+            if torch.cuda.is_bf16_supported():
+                compute_dtype = torch.bfloat16
+        except Exception:
+            pass
+
+    accelerate_available = bool(
+        compatibility.get("hardware", {}).get("software", {}).get("accelerate", {}).get("available")
+    )
+    kwargs = {"low_cpu_mem_usage": accelerate_available}
+    if dtype is not None:
+        kwargs["torch_dtype"] = dtype
+
     if device == "cuda":
-        if kwargs["low_cpu_mem_usage"]:
+        if not accelerate_available:
+            if quantization_mode == "int4":
+                raise RuntimeError("Для INT4 требуется установленный accelerate.")
+        else:
             kwargs["device_map"] = "auto"
             max_memory = _llm_max_memory(compatibility)
-            if max_memory and profile_is_reliable:
+            if max_memory and profile_is_reliable and quantization_mode != "int4":
                 kwargs["max_memory"] = max_memory
     elif device in ("mps", "xpu"):
-        # Load in host RAM and transfer explicitly; auto device maps are not
-        # equally reliable across Apple Metal and Intel XPU environments.
+        # Load in host RAM and transfer explicitly on non-CUDA accelerators.
         pass
-    elif kwargs["low_cpu_mem_usage"]:
+    elif accelerate_available:
         kwargs["device_map"] = "cpu"
 
-    if profile.get("quantization") == "4bit-nf4":
+    if quantization_mode == "int4" and not use_prequantized:
         try:
             from transformers import BitsAndBytesConfig
             kwargs["quantization_config"] = BitsAndBytesConfig(
                 load_in_4bit=True,
                 bnb_4bit_quant_type="nf4",
-                bnb_4bit_compute_dtype=dtype,
+                bnb_4bit_compute_dtype=compute_dtype,
                 bnb_4bit_use_double_quant=True,
             )
         except Exception as exc:
             raise RuntimeError(
-                "Диагностика выбрала 4-битный режим, но BitsAndBytes недоступен: "
+                "Не удалось включить INT4: установите совместимую версию bitsandbytes. "
                 + f"{type(exc).__name__}: {str(exc)[:240]}"
             ) from exc
+
+    profile.update(
+        device=device,
+        dtype="float16" if dtype is not None else "native",
+        quantization=applied_quantization,
+    )
 
     try:
         try:
             model = model_cls.from_pretrained(path, **kwargs)
         except TypeError:
-            # Compatibility with Transformers releases that still expect torch_dtype
             if "torch_dtype" in kwargs:
                 kwargs["dtype"] = kwargs.pop("torch_dtype")
             model = model_cls.from_pretrained(path, **kwargs)
@@ -1043,7 +1050,7 @@ def worker():
                 if kind == "download":
                     job["result"] = _download_hf_model(job["req"], job)
                 elif kind == "load":
-                    load_model(job["req"].model_id, job["req"].model_path or "", job)
+                    load_model(job["req"].model_id, job["req"].model_path or "", job, job["req"].quantization)
                 elif kind == "llm_load":
                     _llm_load_with_progress(job)
                 elif kind in ("llm_chat", "llm_suggest"):
@@ -1052,7 +1059,7 @@ def worker():
                     if not LLM_STATE["loaded"]:
                         compatibility = build_compatibility_report(LLM_PATH_DEFAULT, "llm")
                         job["warnings"] = _compatibility_warnings(compatibility)
-                        if not load_llm(LLM_PATH_DEFAULT):
+                        if not load_llm(LLM_PATH_DEFAULT, "none"):
                             raise RuntimeError(LLM_STATE.get("error") or "Не удалось загрузить локальную LLM.")
                     if kind == "llm_chat":
                         reply = _llm_generate(job["req"].messages, job["req"].max_tokens,
@@ -1066,7 +1073,7 @@ def worker():
                     job["stage"] = "Done"
                 else:
                     if not STATE["loaded"]:
-                        load_model(job["req"].model_id, job["req"].model_path or MODEL_PATH_DEFAULT, job)
+                        load_model(job["req"].model_id, job["req"].model_path or MODEL_PATH_DEFAULT, job, job["req"].quantization)
                     run_generate(job["req"], job)
                 with LOCK:
                     job["state"] = "cancelled" if job.get("cancel") else "done"
@@ -1185,14 +1192,28 @@ def job_cancel(job_id: str):
 
 @app.post("/llm/load")
 def llm_load(req: Optional[LoadReq] = None):
-    path = (req.model_path if req and req.model_path else LLM_PATH_DEFAULT)
+    request = req or LoadReq()
+    path = request.model_path or LLM_PATH_DEFAULT
     if not os.path.isdir(path):
         raise HTTPException(404, detail=f"LLM folder not found: {path}")
     compatibility = build_compatibility_report(path, "llm")
     with LLM_LOCK:
-        if LLM_STATE["loaded"] and LLM_STATE["path"] == path:
+        current_quantization = (LLM_STATE.get("profile") or {}).get("quantization", "none")
+        if (LLM_STATE["loaded"] and LLM_STATE["path"] == path
+                and current_quantization in (request.quantization, "pre-quantized") and request.quantization == "none"):
             return {"job_id": None, "ok": True, "message": "already loaded", "device": LLM_STATE["device"]}
-    return {"job_id": enqueue("llm_load", LoadReq(model_path=path), _compatibility_warnings(compatibility))}
+        if LLM_STATE["loaded"]:
+            LLM_STATE.update(loaded=False, model=None, tokenizer=None, processor=None,
+                             adapter=None, profile=None)
+    import gc
+    gc.collect()
+    try:
+        import torch
+        torch.cuda.empty_cache()
+    except Exception:
+        pass
+    load_request = LoadReq(model_path=path, quantization=request.quantization)
+    return {"job_id": enqueue("llm_load", load_request, _compatibility_warnings(compatibility))}
 
 @app.post("/model/unload")
 def model_unload():
