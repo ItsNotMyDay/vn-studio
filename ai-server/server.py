@@ -372,9 +372,37 @@ def load_component(path, name, index, dtype, quant_config=None):
             return _fp(cls, folder, **kw)
     raise RuntimeError(f"Cannot load component '{name}' from {folder}")
 
-def ensure_disk_components(path, required, job):
+def pipeline_optional_overrides(pipe_cls, path, index):
+    """Return None overrides for optional or explicitly disabled pipeline components."""
+    params = set(pipeline_all_params(pipe_cls))
+    optional = set(getattr(pipe_cls, "_optional_components", ()) or ())
+    overrides = {}
+    for name in params:
+        config = index.get(name)
+        explicitly_disabled = (
+            isinstance(config, list)
+            and len(config) == 2
+            and config[0] is None
+            and config[1] is None
+        )
+        missing_optional = (
+            name in optional
+            and name not in index
+            and not os.path.isdir(os.path.join(path, name))
+        )
+        if explicitly_disabled or missing_optional:
+            overrides[name] = None
+    return overrides
+
+
+def ensure_disk_components(path, required, job, optional_components=None):
+    optional_components = set(optional_components or ())
     for name in required:
         if os.path.isdir(os.path.join(path, name)):
+            continue
+        # Some Diffusers constructor parameters are optional pipeline components.
+        # They can be deliberately disabled in model_index.json and need no folder.
+        if name in optional_components:
             continue
         if name == "tokenizer":
             job["stage"] = "Repairing missing tokenizer folder"
@@ -464,12 +492,14 @@ def load_model(model_id: str, raw_path: str, job: dict, quantization_mode: str =
         except Exception:
             pipe_cls = DiffusionPipeline
     required = pipeline_required(pipe_cls)
+    all_params = pipeline_all_params(pipe_cls)
+    optional_overrides = pipeline_optional_overrides(pipe_cls, path, index)
     job["stage"] = f"{gpu_name} | {vram} GB | {cls_name or 'DiffusionPipeline'}"
     job["progress"] = 0.05
-    ensure_disk_components(path, required, job)
-    all_params = pipeline_all_params(pipe_cls)
+    ensure_disk_components(path, required, job, optional_overrides.keys())
     undeclared = [n for n in all_params
-                  if n in KNOWN_COMPONENTS and not index_declares(index, n)
+                  if n in KNOWN_COMPONENTS and n not in optional_overrides
+                  and not index_declares(index, n)
                   and os.path.isdir(os.path.join(path, n))]
     with LOCK:
         STATE.update(device=device, path=path, vram_gb=vram,
@@ -480,6 +510,9 @@ def load_model(model_id: str, raw_path: str, job: dict, quantization_mode: str =
     for name in undeclared:
         job["stage"] = f"Loading undeclared component: {name}"
         explicit[name] = load_component(path, name, index, dtype)
+    # Pass None for disabled/missing optional components (e.g. Stable Diffusion
+    # safety_checker in tiny checkpoints) instead of requiring an on-disk folder.
+    component_kwargs = {**explicit, **optional_overrides}
     quant = "none"
     pipe = None
     if quantization_mode == "int4":
@@ -494,7 +527,7 @@ def load_model(model_id: str, raw_path: str, job: dict, quantization_mode: str =
             job["progress"] = 0.2
             t_cfg = DBnB(load_in_4bit=True, bnb_4bit_quant_type="nf4",
                          bnb_4bit_compute_dtype=torch.float16, bnb_4bit_use_double_quant=True)
-            kw = dict(explicit)
+            kw = dict(component_kwargs)
             kw["transformer"] = load_component(path, "transformer", index, torch.float16, t_cfg)
             if os.path.isdir(os.path.join(path, "text_encoder")):
                 try:
@@ -519,12 +552,12 @@ def load_model(model_id: str, raw_path: str, job: dict, quantization_mode: str =
     elif quantization_mode == "fp16":
         job["stage"] = "Загрузка модели в FP16"
         job["progress"] = 0.4
-        pipe = _fp(pipe_cls, path, dtype=torch.float16, **explicit)
+        pipe = _fp(pipe_cls, path, dtype=torch.float16, **component_kwargs)
         quant = "fp16"
     else:
         job["stage"] = "Загрузка без дополнительного квантования (точность весов модели)"
         job["progress"] = 0.4
-        pipe = _fp(pipe_cls, path, dtype="auto", **explicit)
+        pipe = _fp(pipe_cls, path, dtype="auto", **component_kwargs)
         quant = "none"
     job["progress"] = 0.88
     if device == "cuda":
