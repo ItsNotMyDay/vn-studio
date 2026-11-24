@@ -105,6 +105,9 @@ def get_hardware_report(storage_path: Optional[str] = None) -> dict[str, Any]:
             "diffusers": _package_info("diffusers"),
             "accelerate": _package_info("accelerate"),
             "bitsandbytes": _package_info("bitsandbytes"),
+            "gptqmodel": _package_info("gptqmodel"),
+            "auto_gptq": _package_info("auto-gptq"),
+            "autoawq": _package_info("autoawq"),
             "llama_cpp": _package_info("llama-cpp-python"),
             "safetensors": _package_info("safetensors"),
             "torchvision": _package_info("torchvision"),
@@ -278,7 +281,7 @@ def inspect_local_model(model_path: str, requested_kind: str) -> dict[str, Any]:
         ))
         multimodal = bool(has_vision or any(
             token in " ".join(architectures).lower()
-            for token in ("multimodal", "vision2seq", "image", "conditionalgeneration")
+            for token in ("multimodal", "vision2seq", "image")
         ) or model_type.lower() in ("gemma4", "gemma4_text"))
         if multimodal:
             adapter = "transformers_multimodal"
@@ -291,6 +294,7 @@ def inspect_local_model(model_path: str, requested_kind: str) -> dict[str, Any]:
             format_name = "Transformers causal LM"
         quant_config = config.get("quantization_config") or config.get("compression_config")
         quantized = bool(quant_config)
+        quant_method = str((quant_config or {}).get("quant_method") or (quant_config or {}).get("quant_method_name") or "").lower()
         processor_present = any((path / n).exists() for n in (
             "processor_config.json", "preprocessor_config.json", "processor",
         ))
@@ -341,6 +345,7 @@ def inspect_local_model(model_path: str, requested_kind: str) -> dict[str, Any]:
         "architectures": architectures,
         "multimodal": multimodal,
         "quantized": quantized,
+        "quant_method": quant_method if "quant_method" in locals() else None,
         "processor_present": processor_present,
         "tokenizer_present": tokenizer_present,
         "custom_code_required": custom_code,
@@ -400,6 +405,15 @@ def build_compatibility_report(
     elif requested_kind == "image" and not software.get("diffusers"):
         status = "unsupported"
         reasons.append("Для моделей генерации изображений не установлен пакет Diffusers.")
+    elif model.get("quant_method") == "bitsandbytes" and not software.get("bitsandbytes"):
+        status = "unsupported"
+        reasons.append("Эта модель уже квантована через BitsAndBytes, но пакет bitsandbytes не установлен.")
+    elif model.get("quant_method") == "gptq" and not (software.get("gptqmodel") or software.get("auto_gptq")):
+        status = "unsupported"
+        reasons.append("Для GPTQ-модели нужен совместимый backend GPTQModel или AutoGPTQ.")
+    elif model.get("quant_method") == "awq" and not software.get("autoawq"):
+        status = "unsupported"
+        reasons.append("Для AWQ-модели нужен backend AutoAWQ.")
     elif requested_kind == "llm" and model.get("adapter") == "transformers_multimodal":
         # Do not misclassify a model as unsupported just because the older Auto class is missing.
         try:
@@ -422,7 +436,8 @@ def build_compatibility_report(
             elif cuda:
                 free_vram = int(cuda.get("free_vram_bytes") or 0)
                 total_vram = int(cuda.get("total_vram_bytes") or 0)
-                safe_vram = int(min(free_vram or total_vram, total_vram) * 0.82)
+                available_vram = free_vram if cuda.get("free_vram_bytes") is not None else total_vram
+                safe_vram = int(available_vram * 0.82)
                 dtype = "bfloat16" if cuda.get("bf16") else "float16"
                 profile.update(device="cuda", dtype=dtype, device_map="auto")
                 if model.get("quantized"):
@@ -430,7 +445,15 @@ def build_compatibility_report(
                     profile["estimated_vram_gb"] = _gb(int(weight_bytes * 1.25 + 1.5 * (1024 ** 3)))
                 if int(profile["estimated_vram_gb"] * (1024 ** 3)) <= safe_vram:
                     profile["strategy"] = "single_gpu"
-                elif software.get("bitsandbytes") and not model.get("quantized"):
+                    if not software.get("accelerate"):
+                        if ram_free >= estimated_cpu_bytes * 1.25:
+                            status = "warning"
+                            profile["strategy"] = "gpu_full_transfer"
+                            warnings.append("Accelerate не установлен: веса сначала будут загружены в RAM, затем перенесены в GPU.")
+                        else:
+                            status = "blocked"
+                            reasons.append("Без Accelerate модель нужно временно разместить в RAM; доступной оперативной памяти недостаточно.")
+                elif software.get("bitsandbytes") and software.get("accelerate") and not model.get("quantized"):
                     quant_estimate = int(weight_bytes * 0.48 + 1.5 * (1024 ** 3))
                     if quant_estimate <= safe_vram:
                         profile.update(strategy="gpu_4bit", quantization="4bit-nf4",
@@ -447,10 +470,6 @@ def build_compatibility_report(
                     profile.update(strategy="gpu_cpu_offload", offload=True)
                     status = "warning"
                     warnings.append("Модель не помещается целиком в VRAM; потребуется автоматическое размещение частей модели в RAM.")
-                elif not software.get("accelerate") and ram_free >= estimated_cpu_bytes * 1.25:
-                    profile.update(strategy="gpu_full_transfer", offload=False)
-                    status = "warning"
-                    warnings.append("Accelerate не установлен: веса сначала будут загружены в RAM, затем перенесены в GPU.")
                 else:
                     status = "blocked"
                     reasons.append("Не хватает памяти GPU/CPU для безопасной загрузки с текущими библиотеками.")
