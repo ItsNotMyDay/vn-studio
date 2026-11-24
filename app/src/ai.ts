@@ -4,7 +4,6 @@ import type { Character } from './store';
 
 export interface AiSettings {
   endpoint: string;
-  serverToken: string;
   modelId: string;
   modelPath: string;
   llmPath: string;
@@ -24,14 +23,13 @@ export interface AiSettings {
 
 export const AI_DEFAULT: AiSettings = {
   endpoint: 'http://127.0.0.1:8765',
-  serverToken: '',
   modelId: 'qwen_image_2.1_turbo_int8_convrot',
   modelPath: '',
   llmPath: '',
   llmProvider: 'local',
-  openaiBaseUrl: 'https://api.openai.com/v1',
+  openaiBaseUrl: 'https://api.deepseek.com',
   openaiApiKey: '',
-  openaiModel: '',
+  openaiModel: 'deepseek-flash',
   steps: 8,
   guidance: 1.0,
   width: 768,
@@ -45,7 +43,13 @@ export const AI_DEFAULT: AiSettings = {
 export function loadAiSettings(): AiSettings {
   try {
     const raw = localStorage.getItem('vn-studio-ai');
-    if (raw) return { ...AI_DEFAULT, ...JSON.parse(raw) };
+    if (raw) {
+      const saved = JSON.parse(raw);
+      if (saved && typeof saved === 'object') {
+        const { serverToken: _legacyServerToken, ...settings } = saved;
+        return { ...AI_DEFAULT, ...settings };
+      }
+    }
   } catch {}
   return { ...AI_DEFAULT };
 }
@@ -155,22 +159,12 @@ export function buildBackgroundPrompt(desc: string, noPeople: boolean): string {
 
 /* ================================ транспорт ================================ */
 
-function getAiServerToken(): string {
-  try {
-    const raw = localStorage.getItem('vn-studio-ai');
-    const settings = raw ? JSON.parse(raw) : null;
-    return typeof settings?.serverToken === 'string' ? settings.serverToken.trim() : '';
-  } catch { return ''; }
-}
 
 async function jsonFetch(url: string, init?: RequestInit, timeoutMs = 15000): Promise<any> {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), timeoutMs);
   try {
-    const headers = new Headers(init?.headers);
-    const token = getAiServerToken();
-    if (token) headers.set('Authorization', 'Bearer ' + token);
-    const res = await fetch(url, { ...init, headers, signal: ctl.signal });
+    const res = await fetch(url, { ...init, signal: ctl.signal });
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
     return await res.json();
   } finally { clearTimeout(t); }
@@ -181,7 +175,7 @@ export function normalizeOpenAiBase(url: string): string {
   if (!clean) throw new Error('Укажите адрес OpenAI API');
   const parsed = new URL(clean);
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('Адрес API должен начинаться с http:// или https://');
-  return /\/v\d+$/i.test(parsed.pathname.replace(/\/+$/, '')) ? clean : clean + '/v1';
+  return clean;
 }
 
 export interface OpenAiSettings { baseUrl: string; apiKey: string; model: string; }
@@ -194,8 +188,6 @@ async function openAiProxy<T>(endpoint: string, path: string, payload: unknown, 
   const timeout = setTimeout(() => ctl.abort(), 180000);
   try {
     const headers = new Headers({ 'Content-Type': 'application/json' });
-    const serverToken = getAiServerToken();
-    if (serverToken) headers.set('Authorization', 'Bearer ' + serverToken);
     const response = await fetch(endpoint.replace(/\/+$/, '') + path, { method: 'POST', headers, body: JSON.stringify(payload), signal: ctl.signal });
     if (!response.ok) { const detail = await response.text(); throw new Error('OpenAI API · HTTP ' + response.status + ': ' + detail.slice(0, 500)); }
     return await response.json() as T;
@@ -303,8 +295,20 @@ export async function aiDownloadHfModel(
   endpoint: string, repoId: string, kind: 'llm' | 'image',
   onProgress?: (p: number, stage: string) => void, signal?: AbortSignal,
 ): Promise<{ id: string; path: string; kind: string }> {
+  if (typeof repoId !== 'string' || !repoId.trim()) {
+    throw new Error('Укажите текстовую ссылку на репозиторий Hugging Face.');
+  }
+  if (kind !== 'llm' && kind !== 'image') {
+    throw new Error('Выберите тип скачиваемой модели.');
+  }
+  const cleanRepoId = repoId.trim();
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(cleanRepoId)) {
+    throw new Error('Неверный ID репозитория Hugging Face. Ожидается owner/model.');
+  }
   const base = endpoint.replace(/\/+$/, '');
-  const r = await jsonFetch(base + '/models/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ repo_id: repoId, kind }) }, 20000);
+  const payload: { repo_id: string; kind: 'llm' | 'image' } = { repo_id: cleanRepoId, kind };
+  const body = JSON.stringify(payload);
+  const r = await jsonFetch(base + '/models/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body }, 20000);
   if (!r.job_id) throw new Error('сервер не вернул job_id скачивания');
   const final = await aiPollJob(base, r.job_id, j => onProgress?.(j.progress ?? 0, j.stage ?? 'Скачивание…'), signal ?? new AbortController().signal, 3 * 60 * 60 * 1000, 800);
   if (final.state !== 'done' || !final.result) throw new Error(final.message || final.state);
