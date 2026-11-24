@@ -149,7 +149,7 @@ export function buildSpritePrompt(c: Character, expression: string, s: AiSetting
     `skin: ${skinTone(c.skin)}, exact skin tone ${c.skin}`,
     `facial expression: ${EMOTION_PROMPT[expression] ?? EMOTION_PROMPT.neutral}`,
     'clean lineart, soft cel shading, crisp eyes, high detail, studio quality',
-    s.transparent ? 'isolated on plain solid white background, no scenery, no props' : '',
+    s.transparent ? 'isolated on transparent background, no scenery, no props' : '',
   ].filter(Boolean);
   return parts.join(', ');
 }
