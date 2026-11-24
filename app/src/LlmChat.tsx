@@ -54,7 +54,7 @@ export function LlmChat() {
   const endpoint = normalizeEndpoint(s.director.aiEndpoint);
   const [aiCfg, setAiCfg] = useState<AiSettings>(loadAiSettings());
   const remote = aiCfg.llmProvider === 'openai'
-    ? { baseUrl: aiCfg.openaiBaseUrl, apiKey: aiCfg.openaiApiKey, model: aiCfg.openaiModel }
+    ? { baseUrl: aiCfg.openaiBaseUrl, apiKey: aiCfg.openaiApiKey, projectId: aiCfg.openaiProject, model: aiCfg.openaiModel }
     : undefined;
   const [messages, setMessages] = useState<LlmMessage[]>([]);
   const [input, setInput] = useState('');
@@ -84,9 +84,10 @@ export function LlmChat() {
   const refresh = async () => {
     try {
       if (aiCfg.llmProvider === 'openai') {
-        const result = await openAiListModels(endpoint, { baseUrl: aiCfg.openaiBaseUrl, apiKey: aiCfg.openaiApiKey });
+        const result = await openAiListModels(endpoint, { baseUrl: aiCfg.openaiBaseUrl, apiKey: aiCfg.openaiApiKey, projectId: aiCfg.openaiProject });
         const ids = (result.data ?? []).map(item => item.id);
-        const connected = !!aiCfg.openaiModel && (!ids.length || ids.includes(aiCfg.openaiModel));
+        const isYandex = aiCfg.openaiBaseUrl.includes('ai.api.cloud.yandex.net');
+        const connected = !!aiCfg.openaiModel && (!ids.length || ids.includes(aiCfg.openaiModel) || isYandex);
         if (alive.current) setStatus({
           online: true,
           loaded: connected,
