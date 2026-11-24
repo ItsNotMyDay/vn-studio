@@ -1316,7 +1316,7 @@ function AiModelsPanel() {
 
   const patch = (p: Partial<AiSettings>) => setCfg(saveAiSettings(p));
 
-  const openAddModel = (kind: 'llm' | 'image' = 'llm') => {
+  const openAddModel = (kind: 'llm' | 'image') => {
     setHfUrl('');
     setHfKind(kind);
     setApiBase(cfg.openaiBaseUrl);
