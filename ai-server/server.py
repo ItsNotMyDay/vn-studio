@@ -522,7 +522,7 @@ def load_model(model_id: str, raw_path: str, job: dict, quantization_mode: str =
     else:
         job["stage"] = "Загрузка без дополнительного квантования (точность весов модели)"
         job["progress"] = 0.4
-        pipe = _fp(pipe_cls, path, **explicit)
+        pipe = _fp(pipe_cls, path, dtype="auto", **explicit)
         quant = "none"
     job["progress"] = 0.88
     if device == "cuda" and quant == "int4-nf4":
@@ -584,6 +584,8 @@ def _ensure_image_model_for_request(req, job: dict, force_quantization: bool = F
         )
         same_mode = STATE.get("quant") == requested_mode
         if same_model and (not force_quantization or same_mode):
+            job["progress"] = 1.0
+            job["stage"] = f"Already loaded | {STATE.get('quant') or 'unknown'}"
             return
         STATE.update(loaded=False, pipe=None, strategy=None, quant=None, error=None)
 
