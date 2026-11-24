@@ -4,7 +4,7 @@ import {
   Search, GripVertical, Clapperboard, AlertTriangle, PanelLeft, PanelRight, RotateCcw, Shuffle,
   MessageSquare, GitBranch, Sigma, Image, Music, StopCircle, X, Settings, Upload, Sparkles,
   RefreshCw, Loader2, Server, Database, Eye, UserRound, Package, FolderOpen, KeyRound,
-  Cpu, ScanSearch, CheckCircle2, XCircle
+  Cpu, ScanSearch, CheckCircle2
 } from 'lucide-react';
 import type { Node } from '@xyflow/react';
 import {
@@ -1377,10 +1377,14 @@ function AiModelsPanel() {
       else patch({ modelPath: model.path, modelId: model.id });
       setList(await aiListModels(ep));
       setAddMode(null);
-      const report = await aiModelCompatibility(ep, hfKind, model.path, model.id);
-      setCompatibilityReport(report);
-      setCompatibilityOpen(true);
-      s.toast(hfKind === 'llm' ? 'Языковая модель скачана. Проверка совместимости готова.' : 'Модель генерации скачана. Проверка совместимости готова.');
+      s.toast(hfKind === 'llm' ? 'Языковая модель скачана' : 'Модель генерации изображений скачана');
+      try {
+        const report = await aiModelCompatibility(ep, hfKind, model.path, model.id);
+        setCompatibilityReport(report);
+        setCompatibilityOpen(true);
+      } catch (diagnosticError: any) {
+        s.toast('Модель скачана, но проверка совместимости не удалась: ' + (diagnosticError?.message ?? diagnosticError));
+      }
     } catch (error: any) {
       s.toast('Ошибка скачивания: ' + (error instanceof Error ? error.message : String(error)));
     } finally {
