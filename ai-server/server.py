@@ -785,7 +785,10 @@ def load_llm(path: str):
 
 def _apply_template(template_source, messages, thinking):
     apply_template = getattr(template_source, "apply_chat_template", None)
-    has_chat_template = bool(getattr(template_source, "chat_template", None))
+    has_chat_template = bool(
+        getattr(template_source, "chat_template", None)
+        or getattr(getattr(template_source, "tokenizer", None), "chat_template", None)
+    )
     if callable(apply_template) and has_chat_template:
         try:
             return apply_template(
@@ -801,9 +804,9 @@ def _apply_template(template_source, messages, thinking):
     for message in messages:
         role = labels.get(str(message.get("role", "user")), "User")
         content = str(message.get("content", "")).strip()
-        turns.append(f"{role}:\\n{content}")
+        turns.append(f"{role}:\n{content}")
     turns.append("Assistant:")
-    return "\\n\\n".join(turns)
+    return "\n\n".join(turns)
 
 def _llm_generate(messages, max_tokens, temperature, thinking=False, on_chunk=None, cancel_check=None):
     import torch
