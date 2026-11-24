@@ -372,7 +372,7 @@ export function LlmChat() {
 
       {!status.online && (
         <div className="px-3 py-2 border-t border-ink-700 space-y-1.5 text-left">
-          <div className="text-[11px] text-danger leading-snug text-left">{aiCfg.llmProvider === 'openai' ? 'OpenAI API недоступен через AI-сервер ' + endpoint + '. Проверь адрес, API key и токен доступа.' : 'Сервер генерации не отвечает по адресу ' + endpoint + '. Запустите ai-server/server.py.'}</div>
+          <div className="text-[11px] text-danger leading-snug text-left">{aiCfg.llmProvider === 'openai' ? 'OpenAI API недоступен через AI-сервер ' + endpoint + '. Проверь адрес API и ключ провайдера.' : 'Сервер генерации не отвечает по адресу ' + endpoint + '. Запустите ai-server/server.py.'}</div>
           <button className="btn w-full justify-center" onClick={refresh}><RefreshCw size={13} /> Повторить</button>
         </div>
       )}
