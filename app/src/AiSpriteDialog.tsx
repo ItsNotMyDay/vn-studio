@@ -236,7 +236,7 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
               <button className="btn justify-center" disabled={busy} onClick={() => { patch({ seed: (usedSeed || Math.floor(Math.random() * 1e9)) + 1 }); generate(); }}>
                 <Dice5 size={14} /> Ещё вариант
               </button>
-              <button className="btn justify-center" disabled={busy} onClick={generate}><Wand2 size={14} /> Сгенерировать</button>
+              <button className="btn justify-center" disabled={busy} onClick={() => generate()}><Wand2 size={14} /> Сгенерировать</button>
               <button className="btn justify-center" disabled={busy} onClick={generateLocal}><Download size={14} /> Локальный рендер</button>
             </div>
 
