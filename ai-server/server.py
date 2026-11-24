@@ -464,7 +464,9 @@ def load_model(model_id: str, raw_path: str, job: dict):
     quant = None
     pipe = None
     planned_quant = (compatibility.get("profile") or {}).get("quantization")
-    if device == "cuda" and planned_quant == "4bit-nf4" and os.path.isdir(os.path.join(path, "transformer")):
+    if device == "cuda" and planned_quant == "4bit-nf4":
+        if not os.path.isdir(os.path.join(path, "transformer")):
+            raise RuntimeError("Диагностика выбрала 4-битный режим, но в Diffusers-модели нет компонента transformer. Автоматический запуск отменён.")
         try:
             job["stage"] = "Quantizing transformer to 4-bit nf4"
             job["progress"] = 0.2
@@ -486,8 +488,6 @@ def load_model(model_id: str, raw_path: str, job: dict):
             pipe = _fp(pipe_cls, path, dtype=dtype, **kw)
             quant = "4bit-nf4"
         except Exception as e:
-            pipe = None
-            job["stage"] = f"4-bit failed ({type(e).__name__}: {str(e)[:120]}), trying 8-bit"
             try:
                 from diffusers import BitsAndBytesConfig as DBnB
                 t_cfg = DBnB(load_in_8bit=True)
@@ -495,13 +495,18 @@ def load_model(model_id: str, raw_path: str, job: dict):
                 kw["transformer"] = load_component(path, "transformer", index, dtype, t_cfg)
                 pipe = _fp(pipe_cls, path, dtype=dtype, **kw)
                 quant = "8bit"
-            except Exception:
-                pipe = None
-    if pipe is None:
-        job["stage"] = "Loading float16 pipeline"
+            except Exception as fallback_error:
+                raise RuntimeError(
+                    "Не удалось применить рассчитанный 4/8-битный профиль; "
+                    "сервер не будет запускать более прожорливый FP16 режим. "
+                    + f"4-bit: {type(e).__name__}: {str(e)[:180]}; "
+                    + f"8-bit: {type(fallback_error).__name__}: {str(fallback_error)[:180]}"
+                ) from fallback_error
+    else:
+        job["stage"] = "Loading " + str(dtype).replace("torch.", "") + " pipeline"
         job["progress"] = 0.4
         pipe = _fp(pipe_cls, path, dtype=dtype, **explicit)
-        quant = "fp16"
+        quant = "fp16" if dtype == torch.float16 else str(dtype).replace("torch.", "")
     job["progress"] = 0.88
     if device == "cuda":
         use_offload = bool((compatibility.get("profile") or {}).get("offload")) or vram < LOW_VRAM_GB
