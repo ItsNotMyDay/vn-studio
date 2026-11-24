@@ -52,5 +52,5 @@ export function getVariableAutocomplete(
   const character = characters.find(item => characterVariableAlias(item) === alias);
   if (!character) return null;
   const items = character.vars.filter(variable => variable.key.toLocaleUpperCase().includes(query));
-  return { kind: 'variable', start, end: cursor, query, character, items };
+  return { kind: 'variable', start: start + dot + 2, end: cursor, query, character, items };
 }
