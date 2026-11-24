@@ -507,7 +507,9 @@ def load_model(model_id: str, raw_path: str, job: dict, quantization_mode: str =
             job["stage"] = "Сборка INT4 pipeline"
             if not compatibility.get("hardware", {}).get("software", {}).get("accelerate", {}).get("available"):
                 raise RuntimeError("Для INT4-квантования Diffusers требуется пакет accelerate.")
-            pipe = _fp(pipe_cls, path, dtype=torch.float16, device_map="auto", **kw)
+            # Diffusers BitsAndBytes accepts explicit placement strategies (cuda/balanced/cpu), not Transformers-style "auto".
+            # This app currently targets a single selected CUDA device for INT4 loading.
+            pipe = _fp(pipe_cls, path, dtype=torch.float16, device_map="cuda", **kw)
             quant = "int4-nf4"
         except Exception as exc:
             raise RuntimeError(
