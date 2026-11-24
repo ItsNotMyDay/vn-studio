@@ -651,7 +651,7 @@ export const useStore = create<Store>((set, get) => {
         if (kind === 'character') delete sprites[refId];
         return;
       }
-      entities[key] = { ...prev, hiding: true, effect: fx, moveEase: undefined, duration: num(d.duration, 0.6) };
+      entities[key] = { ...prev, src: nodeId, hiding: true, effect: fx, moveEase: undefined, duration: num(d.duration, 0.6) };
       return;
     }
     const prev = entities[key];
