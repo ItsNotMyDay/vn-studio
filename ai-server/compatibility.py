@@ -174,9 +174,13 @@ def get_hardware_report(storage_path: Optional[str] = None) -> dict[str, Any]:
 
     check_path = storage_path or os.path.dirname(__file__)
     try:
-        usage = shutil.disk_usage(check_path)
+        original_path = Path(check_path).expanduser().absolute()
+        disk_path = original_path
+        while not disk_path.exists() and disk_path.parent != disk_path:
+            disk_path = disk_path.parent
+        usage = shutil.disk_usage(str(disk_path))
         report["storage"] = {
-            "path": os.path.abspath(check_path),
+            "path": str(original_path),
             "free_gb": _gb(usage.free),
             "total_gb": _gb(usage.total),
             "free_bytes": usage.free,
@@ -459,25 +463,41 @@ def build_compatibility_report(
                         profile.update(strategy="gpu_4bit", quantization="4bit-nf4",
                                        estimated_vram_gb=_gb(quant_estimate))
                         warnings.append("Будет применено 4-битное квантование; качество может немного измениться.")
-                    elif ram_free > estimated_cpu_bytes * 0.7 and software.get("accelerate"):
+                    elif ram_free >= estimated_cpu_bytes * 0.85 and software.get("accelerate"):
                         profile.update(strategy="gpu_cpu_offload", offload=True)
                         status = "warning"
                         warnings.append("Часть слоёв будет размещена в оперативной памяти. Скорость может заметно снизиться.")
+                    elif ram_free >= estimated_cpu_bytes * 1.25:
+                        profile.update(device="cpu", dtype="float32", strategy="cpu_fp32", device_map="cpu",
+                                       quantization="none")
+                        status = "warning"
+                        warnings.append("Квантованный GPU-профиль не помещается; выбран резервный CPU FP32 режим.")
                     else:
                         status = "blocked"
                         reasons.append("Не хватает доступной VRAM и RAM для безопасной загрузки этой модели.")
-                elif ram_free > estimated_cpu_bytes * 0.7 and software.get("accelerate"):
+                elif ram_free >= estimated_cpu_bytes * 0.85 and software.get("accelerate"):
                     profile.update(strategy="gpu_cpu_offload", offload=True)
                     status = "warning"
                     warnings.append("Модель не помещается целиком в VRAM; потребуется автоматическое размещение частей модели в RAM.")
+                elif ram_free >= estimated_cpu_bytes * 1.25:
+                    profile.update(device="cpu", dtype="float32", strategy="cpu_fp32", device_map="cpu",
+                                   quantization="none")
+                    status = "warning"
+                    warnings.append("Модель не помещается в GPU; выбран CPU FP32 режим, который будет медленнее.")
                 else:
                     status = "blocked"
                     reasons.append("Не хватает памяти GPU/CPU для безопасной загрузки с текущими библиотеками.")
             else:
                 if other_accelerator:
-                    profile.update(device=other_accelerator.get("backend"), strategy="accelerator_auto", device_map="auto")
-                    status = "warning"
-                    warnings.append("Обнаружен ускоритель, но точная оценка его памяти недоступна. Пробный запуск обязателен.")
+                    backend = str(other_accelerator.get("backend"))
+                    if ram_free >= estimated_cpu_bytes * 1.25:
+                        profile.update(device=backend, dtype="float16" if backend == "mps" else "bfloat16",
+                                       strategy=backend + "_full_transfer", device_map=backend)
+                        status = "warning"
+                        warnings.append("Обнаружен ускоритель без надёжной оценки VRAM; веса сначала разместятся в RAM, затем будут перенесены на ускоритель.")
+                    else:
+                        status = "blocked"
+                        reasons.append("Недостаточно RAM для загрузки модели на обнаруженный ускоритель без device-map.")
                 elif ram_free >= estimated_cpu_bytes * 1.25:
                     profile.update(device="cpu", dtype="float32", strategy="cpu_fp32", device_map="cpu")
                     status = "warning"
@@ -494,13 +514,13 @@ def build_compatibility_report(
                 profile.update(device="cuda", dtype="float16", device_map="cuda")
                 if estimated_gpu_bytes <= safe_vram:
                     profile.update(strategy="full_gpu")
-                elif software.get("bitsandbytes") and os.path.isdir(os.path.join(model.get("path") or "", "transformer")):
+                elif software.get("bitsandbytes") and software.get("accelerate") and os.path.isdir(os.path.join(model.get("path") or "", "transformer")):
                     quant_estimate = int(weight_bytes * 0.48 + 2 * (1024 ** 3))
                     if quant_estimate <= safe_vram:
                         profile.update(strategy="gpu_4bit", quantization="4bit-nf4",
                                        estimated_vram_gb=_gb(quant_estimate))
                         warnings.append("Трансформер будет загружен в 4-битном режиме.")
-                    elif software.get("accelerate") and ram_free > weight_bytes * 1.35 and available_vram >= 2 * (1024 ** 3):
+                    elif software.get("accelerate") and ram_free >= estimated_cpu_bytes * 0.85 and available_vram >= 2 * (1024 ** 3):
                         profile.update(strategy="sequential_cpu_offload", offload=True)
                         status = "warning"
                         warnings.append("Модель будет загружаться с последовательным CPU offload; генерация будет медленнее.")
@@ -511,7 +531,7 @@ def build_compatibility_report(
                     else:
                         status = "blocked"
                         reasons.append("Недостаточно VRAM/RAM для безопасного запуска Diffusers-модели.")
-                elif software.get("accelerate") and ram_free > weight_bytes * 1.35 and available_vram >= 2 * (1024 ** 3):
+                elif software.get("accelerate") and ram_free >= estimated_cpu_bytes * 0.85 and available_vram >= 2 * (1024 ** 3):
                     profile.update(strategy="sequential_cpu_offload", offload=True)
                     status = "warning"
                     warnings.append("Модель будет загружаться с последовательным CPU offload; генерация будет медленнее.")
