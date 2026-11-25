@@ -523,7 +523,7 @@ class AudioRuntime:
             raise RuntimeError("Сначала запусти ACE-Step и дождись загрузки аудиомодели")
         return self._submit("generate", "Ожидание генерации", lambda job_id: self._generate(job_id, request))
 
-    def _generate(self, job_id: str, request: AudioGenerateRequest) -> dict[str, Any]:
+    def _generate(self, job_id: str, request: Any) -> dict[str, Any]:
         if not self._generation_lock.acquire(blocking=False):
             raise RuntimeError("ACE-Step уже выполняет другую генерацию. Дождись её завершения.")
         try:
