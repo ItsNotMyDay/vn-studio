@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Clapperboard, Plus, Search, FolderOpen, Copy, Trash2, Pencil, Check, X, Film, Boxes, Clock, Sparkles, Play, History } from 'lucide-react';
+import { Clapperboard, Plus, Search, FolderOpen, Copy, Trash2, Pencil, Check, X, Film, Boxes, Clock, Sparkles, Play, History, RotateCcw } from 'lucide-react';
 import { useStore } from './store';
 
 const COVERS = [
@@ -100,6 +100,9 @@ export function Launcher() {
             <option value="created">Сначала новые</option>
             <option value="name">По имени</option>
           </select>
+          <button className="btn" onClick={() => s.restoreDemoProject()}>
+            <RotateCcw size={14} /> Восстановить демо-проект
+          </button>
           <button className="btn btn-primary" onClick={() => s.createEmptyProject()}>
             <Plus size={14} /> Создать пустой проект
           </button>
