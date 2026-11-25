@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import {
   AudioLines,
   Check,
@@ -335,6 +335,8 @@ export function AudioEditor({ blob, filename, onApply }: AudioEditorProps) {
   const [rendering, setRendering] = useState(false);
   const [error, setError] = useState('');
   const playbackRef = useRef<PlaybackHandle | null>(null);
+  const waveformRef = useRef<HTMLDivElement>(null);
+  const isSeekingRef = useRef(false);
 
   const stopPlayback = useCallback(() => {
     const active = playbackRef.current;
@@ -358,6 +360,91 @@ export function AudioEditor({ blob, filename, onApply }: AudioEditorProps) {
       setPlayhead(Math.min(trimEnd, trimStart + elapsed));
     }, 40);
   }, [trimEnd, trimStart]);
+
+  const finishPlayback = useCallback((active: PlaybackHandle) => {
+    if (playbackRef.current !== active) return;
+    playbackRef.current = null;
+    if (active.timer !== null) window.clearInterval(active.timer);
+    setPlaying(false);
+    setPaused(false);
+    setPlayhead(trimEnd);
+    void active.context.close().catch(() => undefined);
+  }, [trimEnd]);
+
+  const replacePlaybackSource = useCallback((active: PlaybackHandle, offset: number) => {
+    if (!buffer) return;
+    const duration = trimEnd - trimStart;
+    const nextOffset = clamp(offset, 0, duration);
+    const oldSource = active.source;
+    oldSource.onended = null;
+    try { oldSource.stop(); } catch { /* source may already have ended */ }
+
+    if (nextOffset >= duration) {
+      finishPlayback(active);
+      return;
+    }
+
+    const source = active.context.createBufferSource();
+    source.buffer = buffer;
+    source.connect(active.nodes.low);
+    active.source = source;
+    active.offset = nextOffset;
+    active.startedAt = active.context.currentTime;
+    applyPlaybackFade(active, nextOffset, duration, fadeIn, fadeOut);
+
+    source.onended = () => finishPlayback(active);
+    source.start(active.context.currentTime, trimStart + nextOffset, duration - nextOffset);
+    setPlayhead(trimStart + nextOffset);
+    if (playing) startProgressTimer(active);
+  }, [buffer, fadeIn, fadeOut, finishPlayback, playing, startProgressTimer, trimEnd, trimStart]);
+
+  const seekToTime = useCallback((time: number) => {
+    const nextTime = clamp(time, trimStart, trimEnd);
+    setPlayhead(nextTime);
+    const active = playbackRef.current;
+    if (!active) return;
+    replacePlaybackSource(active, nextTime - trimStart);
+  }, [replacePlaybackSource, trimEnd, trimStart]);
+
+  const seekFromPointer = (clientX: number) => {
+    const element = waveformRef.current;
+    if (!element || !buffer) return;
+    const bounds = element.getBoundingClientRect();
+    const innerPadding = 8;
+    const innerWidth = Math.max(1, bounds.width - innerPadding * 2);
+    const ratio = clamp((clientX - bounds.left - innerPadding) / innerWidth, 0, 1);
+    seekToTime(ratio * buffer.duration);
+  };
+
+  const handleWaveformPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || loading || rendering) return;
+    event.preventDefault();
+    isSeekingRef.current = true;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    seekFromPointer(event.clientX);
+  };
+
+  const handleWaveformPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!isSeekingRef.current || loading || rendering) return;
+    seekFromPointer(event.clientX);
+  };
+
+  const handleWaveformPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
+    isSeekingRef.current = false;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  const handleWaveformKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!buffer || (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Home' && event.key !== 'End')) return;
+    event.preventDefault();
+    const step = event.shiftKey ? 1 : 0.1;
+    const next = event.key === 'Home' ? trimStart
+      : event.key === 'End' ? trimEnd
+      : playhead + (event.key === 'ArrowRight' ? step : -step);
+    seekToTime(next);
+  };
 
   const pausePlayback = async () => {
     const active = playbackRef.current;
@@ -536,6 +623,7 @@ export function AudioEditor({ blob, filename, onApply }: AudioEditorProps) {
       const source = context.createBufferSource();
       source.buffer = buffer;
       const duration = trimEnd - trimStart;
+      const initialOffset = playhead >= trimEnd ? 0 : clamp(playhead - trimStart, 0, Math.max(0, duration - 0.01));
       const nodes = createPlaybackGraph(context, source, {
         bass, mid, treble, pan, compression, volume, normalizeGain: normalizationGain,
       });
@@ -545,25 +633,17 @@ export function AudioEditor({ blob, filename, onApply }: AudioEditorProps) {
         nodes,
         timer: null,
         startedAt: context.currentTime,
-        offset: 0,
+        offset: initialOffset,
       };
       playbackRef.current = active;
-      applyPlaybackFade(active, 0, duration, fadeIn, fadeOut);
-      source.start(context.currentTime, trimStart, duration);
+      applyPlaybackFade(active, initialOffset, duration, fadeIn, fadeOut);
+      source.start(context.currentTime, trimStart + initialOffset, duration - initialOffset);
       setPlaying(true);
       setPaused(false);
-      setPlayhead(trimStart);
+      setPlayhead(trimStart + initialOffset);
       startProgressTimer(active);
 
-      source.onended = () => {
-        if (playbackRef.current !== active) return;
-        playbackRef.current = null;
-        if (active.timer !== null) window.clearInterval(active.timer);
-        setPlaying(false);
-        setPaused(false);
-        setPlayhead(trimEnd);
-        void context.close().catch(() => undefined);
-      };
+      source.onended = () => finishPlayback(active);
     } catch (reason) {
       playbackRef.current = null;
       setError(reason instanceof Error ? reason.message : 'Не удалось воспроизвести фрагмент.');
@@ -697,8 +777,25 @@ export function AudioEditor({ blob, filename, onApply }: AudioEditorProps) {
                 {formatTime(trimEnd - trimStart)} из {formatTime(buffer.duration)}
               </span>
             </div>
-            <div className="relative h-16 rounded-md bg-ink-950/80 px-2 overflow-hidden">
-              <div className="absolute inset-0 flex items-center gap-[2px]">
+            <div
+              ref={waveformRef}
+              role="slider"
+              tabIndex={0}
+              aria-label="Позиция воспроизведения"
+              aria-valuemin={trimStart}
+              aria-valuemax={trimEnd}
+              aria-valuenow={playhead}
+              aria-valuetext={formatTime(playhead)}
+              className="relative h-16 rounded-md bg-ink-950/80 overflow-hidden cursor-ew-resize select-none outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent)]"
+              style={{ touchAction: 'none' }}
+              onPointerDown={handleWaveformPointerDown}
+              onPointerMove={handleWaveformPointerMove}
+              onPointerUp={handleWaveformPointerUp}
+              onPointerCancel={handleWaveformPointerUp}
+              onLostPointerCapture={() => { isSeekingRef.current = false; }}
+              onKeyDown={handleWaveformKeyDown}
+            >
+              <div className="absolute inset-y-0 left-2 right-2 flex items-center gap-[2px] pointer-events-none">
               {peaks.map((peak, index) => {
                 const point = (index + 0.5) / peaks.length * buffer.duration;
                 const selected = point >= trimStart && point <= trimEnd;
@@ -848,6 +945,9 @@ export function AudioEditor({ blob, filename, onApply }: AudioEditorProps) {
               {rendering ? 'Обработка…' : 'Применить обработку'}
             </button>
           </div>
+          <p className="text-[9px] text-mute leading-relaxed">
+            Кликни по форме волны или перетащи вертикальную отметку, чтобы перейти к нужному моменту. При воспроизведении звук продолжится с выбранной позиции. Клавиши ←/→ перемещают курсор на 0,1 секунды, Shift + ←/→ — на 1 секунду.
+          </p>
           <p className="text-[9px] text-mute leading-relaxed">
             Громкость, панорама, эквалайзер, компрессия и плавные переходы меняются прямо во время прослушивания. Точки обрезки фиксируются на время воспроизведения.
           </p>
