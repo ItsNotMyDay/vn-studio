@@ -162,7 +162,12 @@ function TrackAudioEditorModal({ track, onClose }: { track: Track; onClose: () =
         <div className="p-4 space-y-3">
           {loading && <div className="text-[11px] text-mute py-4">Открываем аудиофайл…</div>}
           {error && <div className="text-[11px] text-danger rounded-lg border border-danger/40 bg-danger/10 px-3 py-2">{error}</div>}
-          {blob && <AudioEditor blob={blob} filename={track.name} onApply={saveEditedAudio} />}
+          {blob && <AudioEditor
+            blob={blob}
+            filename={track.name}
+            onApply={saveEditedAudio}
+            onRename={name => s.renameTrack(track.id, name)}
+          />}
           {saving && <div className="text-[10px] text-mute">Сохраняем изменённый файл в ассеты…</div>}
         </div>
       </div>
@@ -194,11 +199,6 @@ function TrackRow({ t }: { t: Track }) {
         >
           {t.name}{t.assetId ? ' · файл' : ''}
         </button>
-        {t.assetId && (
-          <button className="btn !px-2 !py-1" title="Редактировать аудио" onClick={() => setEditorOpen(true)}>
-            <SlidersHorizontal size={12} />
-          </button>
-        )}
         <button className="btn !px-2 !py-1" title="Прослушать" onClick={() => previewTrack(t)}><Play size={12} /></button>
         {t.assetId && (
           <button className="opacity-0 group-hover:opacity-100 text-mute hover:text-danger" title="Удалить аудио" onClick={() => s.deleteTrack(t.id)}>

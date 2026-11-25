@@ -523,8 +523,8 @@ interface Store {
 
   onNodesChange: (chs: NodeChangeset<Node>) => void;
   onEdgesChange: (chs: EdgeChangeset<Edge>) => void;
-  onConnect: (c: Connection) => void;
-  addNode: (kind: NodeKind, pos: { x: number; y: number }, data?: any) => string;
+  onConnect: (c: Connection, commitBefore?: boolean) => void;
+  addNode: (kind: NodeKind, pos: { x: number; y: number }, data?: any, commitBefore?: boolean) => string;
   updateNodeData: (id: string, patch: any) => void;
   deleteSelected: () => void;
   deleteEdge: (id: string) => void;
@@ -545,7 +545,8 @@ interface Store {
 
   uploadBackground: (file: File) => Promise<void>;
   uploadTrack: (file: File) => Promise<void>;
-  addTrackBlob: (name: string, blob: Blob, mode?: 'music' | 'effect') => Promise<string>;
+  addTrackBlob: (name: string, blob: Blob, mode?: 'music' | 'effect', commitBefore?: boolean) => Promise<string>;
+  renameTrack: (id: string, name: string, commitBefore?: boolean) => void;
   uploadSprite: (charId: string, expression: string, file: File) => Promise<void>;
   applySpriteBlob: (charId: string, expression: string, blob: Blob, source: 'ai' | 'procedural' | 'upload', meta?: { prompt?: string; seed?: number; model?: string }) => Promise<void>;
   deleteBackground: (id: string) => void;
@@ -1044,11 +1045,11 @@ export const useStore = create<Store>((set, get) => {
 
     onNodesChange: chs => mutateScene(sc => ({ ...sc, nodes: applyNodes(chs.toArray(), sc.nodes) })),
     onEdgesChange: chs => mutateScene(sc => ({ ...sc, edges: applyEdges(chs.toArray(), sc.edges) })),
-    onConnect: c => {
+    onConnect: (c, commitBefore = true) => {
       const sc = get().scene();
       if (!sc || !c.source || !c.target || c.source === c.target) return;
       const h = c.sourceHandle ?? '';
-      get().commit();
+      if (commitBefore) get().commit();
       audioEngine.audioEnsure?.();
       audioEngine.audioTick?.(980, 0.05, 0.07);
       mutateScene(s => ({
@@ -1059,8 +1060,8 @@ export const useStore = create<Store>((set, get) => {
         ),
       }));
     },
-    addNode: (kind, pos, data) => {
-      get().commit();
+    addNode: (kind, pos, data, commitBefore = true) => {
+      if (commitBefore) get().commit();
       audioEngine.audioEnsure?.();
       audioEngine.audioTick?.(760, 0.06, 0.08);
       const p = get().project;
@@ -1295,12 +1296,12 @@ export const useStore = create<Store>((set, get) => {
         get().toast(`Трек загружен: ${file.name}`);
       } catch { get().toast('Не удалось сохранить файл'); }
     },
-    addTrackBlob: async (name, blob, mode = 'music') => {
+    addTrackBlob: async (name, blob, mode = 'music', commitBefore = true) => {
       const assetId = `tr_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
       try {
         await putBlob(assetId, blob);
         const trackId = uid('tr');
-        get().commit();
+        if (commitBefore) get().commit();
         set(s => ({
           project: {
             ...s.project,
@@ -1343,6 +1344,21 @@ export const useStore = create<Store>((set, get) => {
       set(s => ({ project: { ...s.project, backgrounds: s.project.backgrounds.filter(x => x.id !== id) } }));
       scheduleAssetPurge(b.assetId);
       get().toast('Фон удалён', true);
+    },
+    renameTrack: (id, name, commitBefore = true) => {
+      const nextName = String(name ?? '').trim();
+      if (!nextName) throw new Error('Имя аудио не может быть пустым.');
+      const current = get().project.tracks.find(track => track.id === id);
+      if (!current) throw new Error('Аудиоассет не найден.');
+      if (current.name === nextName) return;
+      if (commitBefore) get().commit();
+      set(s => ({
+        project: {
+          ...s.project,
+          tracks: s.project.tracks.map(track => track.id === id ? { ...track, name: nextName } : track),
+        },
+      }));
+      get().toast(`Аудио переименовано: ${nextName}`);
     },
     deleteTrack: id => {
       const t = get().project.tracks.find(x => x.id === id);
