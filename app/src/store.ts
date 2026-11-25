@@ -566,7 +566,7 @@ interface Store {
   save: () => void;
   exportJSON: () => void;
   exportScript: () => void;
-  resetDemo: () => void;
+  restoreDemoProject: () => void;
   toast: (msg: string, undo?: boolean) => void;
   dismissToast: (id: string) => void;
   issues: () => Issue[];
@@ -1616,14 +1616,13 @@ export const useStore = create<Store>((set, get) => {
       URL.revokeObjectURL(a.href);
       get().toast('Сценарий экспортирован');
     },
-    resetDemo: () => {
-      try { localStorage.removeItem('vn-studio-project'); } catch {}
+    restoreDemoProject: () => {
+      const demoProjectId = 'vn-studio-demo';
       const p = seed();
-      const rid = get().activeProjectId;
-      if (rid) writeProject(rid, p);
-      set({ project: p, currentSceneId: p.scenes[0].id, past: [], future: [], player: { ...playerIdle }, selectedCharId: null, preview: null });
-      stopAllAudio();
-      get().toast('Демо-проект восстановлен');
+      try { localStorage.removeItem('vn-studio-project'); } catch {}
+      writeProject(demoProjectId, p);
+      set({ projectsMeta: listProjects() });
+      get().toast('Демо-проект восстановлен в списке проектов');
     },
     toast: (msg, undo) => {
       const id = uid('t');
