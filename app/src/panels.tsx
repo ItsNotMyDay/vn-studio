@@ -18,7 +18,7 @@ import { useAssetURL, getAssetURL, getBlob, putBlob, revokeAssetURL } from './as
 import { launchPlayer, post } from './bus';
 import { AiSpriteDialog } from './AiSpriteDialog';
 import { AiBackgroundDialog } from './AiBackgroundDialog';
-import { AiAudioDialog, type AiAudioTarget } from './AiAudioDialog';
+import { AiAudioDialog } from './AiAudioDialog';
 import { QuantizationDialog } from './QuantizationDialog';
 import { AudioEditor } from './AudioEditor';
 import { SoundEffectBuilder } from './SoundEffectBuilder';
@@ -316,6 +316,7 @@ export function Toolbar() {
 export function Sidebar() {
   const s = useStore();
   const [bgAi, setBgAi] = useState(false);
+  const [musicAiOpen, setMusicAiOpen] = useState(false);
   const [soundBuilderOpen, setSoundBuilderOpen] = useState(false);
   const q = s.search.toLowerCase();
   const scenes = useMemo(() => {
@@ -464,9 +465,19 @@ export function Sidebar() {
 
             <div className="flex items-center justify-between px-1 pt-2">
               <span className="text-[10px] uppercase tracking-wider text-mute">Музыка</span>
-              <UploadButton accept="audio/*" title="Загрузить свой трек" onFile={(f: File) => s.uploadTrack(f)}>
-                <Upload size={12} /> Загрузить
-              </UploadButton>
+              <div className="flex gap-1">
+                <button
+                  className="btn !px-2 !py-1"
+                  style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}
+                  title="Сгенерировать музыку нейросетью"
+                  onClick={() => setMusicAiOpen(true)}
+                >
+                  <Sparkles size={12} /> AI
+                </button>
+                <UploadButton accept="audio/*" title="Загрузить свой трек" onFile={(f: File) => s.uploadTrack(f)}>
+                  <Upload size={12} /> Загрузить
+                </UploadButton>
+              </div>
             </div>
             {musicTracks.map(t => <TrackRow key={t.id} t={t} />)}
             {musicTracks.length === 0 && <div className="text-[11px] text-mute px-2 py-1.5">Музыка не найдена.</div>}
@@ -527,6 +538,7 @@ export function Sidebar() {
       </div>
 
       <AiBackgroundDialog open={bgAi} onClose={() => setBgAi(false)} />
+      <AiAudioDialog open={musicAiOpen} onClose={() => setMusicAiOpen(false)} />
       {soundBuilderOpen && <SoundEffectBuilder open={soundBuilderOpen} onClose={() => setSoundBuilderOpen(false)} />}
     </div>
   );
@@ -842,7 +854,6 @@ export function Inspector() {
   const condChar = s.project.characters.find(c => c.id === d.condCharId);
   const charVars = s.project.characters.find(c => c.id === d.charId)?.vars ?? [];
 
-  const [audioTarget, setAudioTarget] = useState<AiAudioTarget | null>(null);
   const [suggestions, setSuggestions] = useState<{ text: string; tone?: string }[] | null>(null);
   const [suggesting, setSuggesting] = useState(false);
   const [sugPhase, setSugPhase] = useState<null | 'count' | 'list'>(null);
@@ -1107,12 +1118,6 @@ export function Inspector() {
                   </button>
                 </div>
                 <MusicField nodeId={node.id} value={d.track} />
-                <button
-                  className="btn w-full justify-center"
-                  onClick={() => setAudioTarget({ nodeId: node.id, mode: (d.mode ?? 'music') === 'effect' ? 'effect' : 'music' })}
-                >
-                  <AudioLines size={13} /> Создать с помощью AI
-                </button>
                 {(d.mode ?? 'music') !== 'effect' ? (
                   <div className="text-[11px] text-mute leading-snug">
                     Цикличная музыка не имеет синего выхода: подключите её оранжевым портом ♫ снизу любой ноды сюжета, а рыжим портом «стоп при входе в» укажите, где она закончится.
@@ -1437,7 +1442,6 @@ export function Inspector() {
           </div>
         </div>
       )}
-      <AiAudioDialog target={audioTarget} onClose={() => setAudioTarget(null)} />
     </div>
   );
 }
