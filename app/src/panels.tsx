@@ -18,13 +18,15 @@ import { useAssetURL, getAssetURL } from './assets';
 import { launchPlayer, post } from './bus';
 import { AiSpriteDialog } from './AiSpriteDialog';
 import { AiBackgroundDialog } from './AiBackgroundDialog';
+import { AiAudioDialog, type AiAudioTarget } from './AiAudioDialog';
 import { QuantizationDialog } from './QuantizationDialog';
 import {
   loadAiSettings, saveAiSettings, aiHealth, llmHealth, embeddingsHealth, embeddingsClear, aiListModels,
   aiLoadJob, llmLoadJob, aiUnloadModel, llmUnload, aiCancelJob,
   aiDownloadHfModel, openAiListModels, openAiTestConnection, normalizeOpenAiBase,
   aiSystemDiagnostics, aiModelCompatibility,
-  type AiSettings, type ModelCompatibilityReport, type LocalQuantizationMode,
+  aiAudioHealth, aiAudioInstall, aiAudioStart, aiAudioStop, aiAudioPollJob,
+  type AiSettings, type ModelCompatibilityReport, type LocalQuantizationMode, type AudioRuntimeHealth, type JobState,
 } from './ai';
 
 const KIND_ICONS: Record<string, any> = {
@@ -738,6 +740,7 @@ export function Inspector() {
   const condChar = s.project.characters.find(c => c.id === d.condCharId);
   const charVars = s.project.characters.find(c => c.id === d.charId)?.vars ?? [];
 
+  const [audioTarget, setAudioTarget] = useState<AiAudioTarget | null>(null);
   const [suggestions, setSuggestions] = useState<{ text: string; tone?: string }[] | null>(null);
   const [suggesting, setSuggesting] = useState(false);
   const [sugPhase, setSugPhase] = useState<null | 'count' | 'list'>(null);
@@ -1002,6 +1005,12 @@ export function Inspector() {
                   </button>
                 </div>
                 <MusicField nodeId={node.id} value={d.track} />
+                <button
+                  className="btn w-full justify-center"
+                  onClick={() => setAudioTarget({ nodeId: node.id, mode: (d.mode ?? 'music') === 'effect' ? 'effect' : 'music' })}
+                >
+                  <AudioLines size={13} /> Создать с помощью AI
+                </button>
                 {(d.mode ?? 'music') !== 'effect' ? (
                   <div className="text-[11px] text-mute leading-snug">
                     Цикличная музыка не имеет синего выхода: подключите её оранжевым портом ♫ снизу любой ноды сюжета, а рыжим портом «стоп при входе в» укажите, где она закончится.
@@ -1326,6 +1335,7 @@ export function Inspector() {
           </div>
         </div>
       )}
+      <AiAudioDialog target={audioTarget} onClose={() => setAudioTarget(null)} />
     </div>
   );
 }
@@ -1411,15 +1421,19 @@ function AiModelsPanel() {
   const [compatibilityLoading, setCompatibilityLoading] = useState(false);
   const [quantizationTarget, setQuantizationTarget] = useState<null | 'image' | 'llm'>(null);
   const [clearContextLoading, setClearContextLoading] = useState(false);
+  const [audioH, setAudioH] = useState<AudioRuntimeHealth | null>(null);
+  const [audioBusy, setAudioBusy] = useState(false);
+  const [audioProgress, setAudioProgress] = useState<{ p: number; stage: string }>({ p: 0, stage: '' });
+  const [audioOperation, setAudioOperation] = useState<'install' | 'start' | null>(null);
   const ep = (s.director.aiEndpoint || 'http://127.0.0.1:8765').replace(/\/+$/, '');
 
   useEffect(() => {
     let alive = true;
     const tick = async () => {
       try {
-        const [m, ih, lh, eh] = await Promise.all([aiListModels(ep), aiHealth(ep), llmHealth(ep), embeddingsHealth(ep)]);
+        const [m, ih, lh, eh, ah] = await Promise.all([aiListModels(ep), aiHealth(ep), llmHealth(ep), embeddingsHealth(ep), aiAudioHealth(ep)]);
         if (!alive) return;
-        setList(m); setImgH(ih); setLlmH(lh); setEmbH(eh);
+        setList(m); setImgH(ih); setLlmH(lh); setEmbH(eh); setAudioH(ah);
       } catch {}
     };
     tick();
@@ -1654,6 +1668,48 @@ function AiModelsPanel() {
     setProg(p => ({ ...p, llm: { on: false, p: 0, stage: '' } }));
   };
 
+  const runAudioOperation = async (operation: 'install' | 'start') => {
+    if (audioBusy) return;
+    setAudioBusy(true);
+    setAudioOperation(operation);
+    setAudioProgress({ p: 0, stage: operation === 'install' ? 'Подготовка установки…' : 'Запуск аудиомодели…' });
+    const controller = new AbortController();
+    try {
+      const jobId = operation === 'install' ? await aiAudioInstall(ep) : await aiAudioStart(ep);
+      const final = await aiAudioPollJob(
+        ep,
+        jobId,
+        (job: JobState) => setAudioProgress({ p: job.progress ?? 0, stage: job.stage || 'Выполняется…' }),
+        controller.signal,
+        operation === 'install' ? 4 * 60 * 60 * 1000 : 2 * 60 * 60 * 1000,
+        1500,
+      );
+      if (final.state !== 'done') throw new Error(final.message || 'Операция с аудиомоделью завершилась ошибкой');
+      setAudioH(await aiAudioHealth(ep));
+      s.toast(operation === 'install' ? 'Аудиодвижок ACE-Step установлен' : 'Аудиомодель ACE-Step загружена');
+    } catch (error: any) {
+      s.toast((operation === 'install' ? 'Ошибка установки аудиодвижка: ' : 'Ошибка загрузки аудиомодели: ') + (error?.message ?? error));
+      setAudioH(await aiAudioHealth(ep));
+    } finally {
+      setAudioBusy(false);
+      setAudioOperation(null);
+      setAudioProgress({ p: 0, stage: '' });
+    }
+  };
+
+  const stopAudioRuntime = async () => {
+    setAudioBusy(true);
+    try {
+      await aiAudioStop(ep);
+      setAudioH(await aiAudioHealth(ep));
+      s.toast('Аудиодвижок остановлен, видеопамять освобождена');
+    } catch (error: any) {
+      s.toast('Не удалось остановить аудиодвижок: ' + (error?.message ?? error));
+    } finally {
+      setAudioBusy(false);
+    }
+  };
+
   const imgOptions = [...list.image];
   if (cfg.modelPath && !imgOptions.some(o => o.path === cfg.modelPath)) imgOptions.unshift({ id: modelNameOf(cfg.modelPath), path: cfg.modelPath });
   const llmOptions = [...list.llm];
@@ -1801,6 +1857,50 @@ function AiModelsPanel() {
             </div>
           </>
         )}
+      </div>
+
+      <div className="border-t border-ink-700 pt-2 space-y-2">
+        <div className="flex items-center gap-2">
+          <AudioLines size={14} className="text-mute" />
+          <span className="text-[10px] text-mute">Аудиомодель · ACE-Step 1.5</span>
+          <div className="flex-1" />
+          <span className="chip" style={{ borderColor: audioH?.model_loaded ? '#9dff5766' : '#3a4666', color: audioH?.model_loaded ? '#9dff57' : '#8d97b5' }}>
+            {audioH?.model_loaded ? 'модель загружена' : audioH?.running ? 'запускается' : audioH?.installed ? 'движок установлен' : 'не установлен'}
+          </span>
+        </div>
+        {audioBusy && (
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 text-[10px] text-mute">
+              <Loader2 size={12} className="animate-spin" />
+              <span className="truncate">{audioProgress.stage || 'Выполняется операция…'}</span>
+            </div>
+            <ProgressBar p={audioProgress.p} stage={audioProgress.stage} />
+          </div>
+        )}
+        {audioH?.error && !audioH.model_loaded && (
+          <div className="text-[10px] text-danger leading-snug">{audioH.error}</div>
+        )}
+        <div className="flex gap-1.5">
+          {!audioH?.installed ? (
+            <button className="btn btn-primary flex-1 justify-center" disabled={audioBusy || !audioH} onClick={() => void runAudioOperation('install')}>
+              {audioBusy && audioOperation === 'install' ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+              Установить движок
+            </button>
+          ) : !audioH?.model_loaded ? (
+            <button className="btn btn-primary flex-1 justify-center" disabled={audioBusy || !audioH} onClick={() => void runAudioOperation('start')}>
+              {audioBusy && audioOperation === 'start' ? <Loader2 size={12} className="animate-spin" /> : <Server size={12} />}
+              Скачать и загрузить модель
+            </button>
+          ) : (
+            <button className="btn btn-danger flex-1 justify-center" disabled={audioBusy} onClick={() => void stopAudioRuntime()}>
+              {audioBusy ? <Loader2 size={12} className="animate-spin" /> : <X size={12} />}
+              Остановить и выгрузить
+            </button>
+          )}
+        </div>
+        <div className="text-[10px] text-mute leading-snug">
+          ACE-Step работает в отдельном Python-окружении, не затрагивая зависимости LLM и генерации изображений. Модель автоматически подбирает профиль под оборудование; для фоновой музыки и музыкальных акцентов.
+        </div>
       </div>
 
       <div className="border-t border-ink-700 pt-2 space-y-2">
