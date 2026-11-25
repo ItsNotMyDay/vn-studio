@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Loader2, Play, Save, Sparkles, X } from 'lucide-react';
+import { Loader2, Play, Save, Sparkles, X } from 'lucide-react';
 import { renderProceduralEffect, type EffectPattern, type ProceduralEffectOptions } from './audio';
 import { useStore } from './store';
 
@@ -58,10 +58,6 @@ const WAVEFORMS: { value: OscillatorType; label: string }[] = [
   { value: 'square', label: 'Прямоугольная — цифровой сигнал' },
   { value: 'sawtooth', label: 'Пилообразная — резкий синтезатор' },
 ];
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
-}
 
 export function SoundEffectBuilder({ open, onClose }: { open: boolean; onClose: () => void }) {
   const store = useStore();
