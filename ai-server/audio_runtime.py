@@ -497,22 +497,22 @@ class AudioRuntime:
             latest_log = list(self._log_tail[-8:])
             last_error = self._last_error
             process = self._process
+        if model_loaded:
+            stage = "Модель загружена"
+        elif running:
+            stage = latest_log[-1][:180] if latest_log else "Запуск ACE-Step и загрузка модели"
+        elif installed:
+            stage = "Движок установлен"
+        else:
+            stage = "Движок не установлен"
         return {
             "installed": installed,
             "running": running,
             "model_loaded": model_loaded,
             "model": (data or {}).get("loaded_model") if isinstance(data, dict) else None,
             "port": self.port,
-            "stage": (
-                "Модель загружена"
-                if model_loaded
-                else "Запуск ACE-Step"
-                if running
-                else "Движок установлен"
-                if installed
-                else "Движок не установлен"
-            ),
-            "error": service_error or last_error,
+            "stage": stage,
+            "error": last_error or (service_error if not running else None),
             "log_tail": latest_log,
             "pid": process.pid if process is not None and running else None,
         }
@@ -611,6 +611,9 @@ class AudioRuntime:
     def shutdown(self) -> None:
         with self._lock:
             self._shutdown = True
+            active_process = self._active_process
+        if active_process is not None:
+            self._terminate_process(active_process)
         self.stop_service()
         self._executor.shutdown(wait=False, cancel_futures=True)
 
