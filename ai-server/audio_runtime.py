@@ -22,8 +22,6 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from fastapi import HTTPException
-from pydantic import BaseModel, Field
 
 
 ACE_STEP_REPOSITORY = "https://github.com/ACE-Step/ACE-Step-1.5"
@@ -34,13 +32,6 @@ ACE_STEP_ARCHIVE = (
 DEFAULT_AUDIO_PORT = int(os.environ.get("VN_AUDIO_PORT", "8766"))
 
 
-class AudioGenerateRequest(BaseModel):
-    prompt: str = Field(min_length=3, max_length=2000)
-    lyrics: str = Field(default="", max_length=12000)
-    duration: float = Field(default=30, ge=10, le=600)
-    bpm: int | None = Field(default=None, ge=30, le=300)
-    instrumental: bool = True
-    mode: str = "music"
 
 
 def unwrap_api_data(payload: Any) -> Any:
@@ -526,7 +517,7 @@ class AudioRuntime:
             "pid": process.pid if process is not None and running else None,
         }
 
-    def generate(self, request: AudioGenerateRequest) -> str:
+    def generate(self, request: Any) -> str:
         status = self.health()
         if not status["model_loaded"]:
             raise RuntimeError("Сначала запусти ACE-Step и дождись загрузки аудиомодели")
