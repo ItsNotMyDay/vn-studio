@@ -394,6 +394,7 @@ export function AudioEditor({ blob, filename, onApply }: AudioEditorProps) {
 
   const applyProcessing = async () => {
     if (!buffer || rendering) return;
+    if (playing) stopPlayback();
     setRendering(true);
     setError('');
     try {
@@ -423,6 +424,7 @@ export function AudioEditor({ blob, filename, onApply }: AudioEditorProps) {
     if (!buffer) return;
     setTrimStart(0);
     setTrimEnd(buffer.duration);
+    setPlayhead(0);
     setVolume(100);
     setFadeIn(0);
     setFadeOut(0);
@@ -471,7 +473,7 @@ export function AudioEditor({ blob, filename, onApply }: AudioEditorProps) {
         step={step}
         value={clamp(value, min, Math.max(min, max))}
         onChange={event => onChange(Number(event.target.value))}
-        disabled={loading || !buffer || rendering}
+        disabled={loading || !buffer || rendering || playing}
       />
     </label>
   );
@@ -551,6 +553,9 @@ export function AudioEditor({ blob, filename, onApply }: AudioEditorProps) {
                 <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-200">Микшер</div>
                 {renderSlider('Громкость', volume, 0, 200, 1, ' %', setVolume)}
                 {renderSlider('Панорама', pan, -100, 100, 1, '', setPan)}
+                <div className="flex justify-between text-[9px] text-mute -mt-2">
+                  <span>Влево</span><span>Центр</span><span>Вправо</span>
+                </div>
                 <div className="grid grid-cols-3 gap-3">
                   {renderSlider('Бас', bass, -12, 12, 1, ' dB', setBass)}
                   {renderSlider('Середина', mid, -12, 12, 1, ' dB', setMid)}
@@ -558,11 +563,11 @@ export function AudioEditor({ blob, filename, onApply }: AudioEditorProps) {
                 </div>
                 <div className="flex flex-wrap gap-x-4 gap-y-2 pt-1">
                   <label className="flex items-center gap-2 text-[10.5px] text-mute">
-                    <input type="checkbox" checked={compression} onChange={event => setCompression(event.target.checked)} disabled={rendering} />
+                    <input type="checkbox" checked={compression} onChange={event => setCompression(event.target.checked)} disabled={rendering || playing} />
                     Лёгкая компрессия
                   </label>
                   <label className="flex items-center gap-2 text-[10.5px] text-mute">
-                    <input type="checkbox" checked={normalize} onChange={event => setNormalize(event.target.checked)} disabled={rendering} />
+                    <input type="checkbox" checked={normalize} onChange={event => setNormalize(event.target.checked)} disabled={rendering || playing} />
                     Нормализация до −1 dB
                   </label>
                 </div>
