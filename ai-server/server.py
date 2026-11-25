@@ -159,6 +159,23 @@ def embeddings_index(req: IndexReq):
     save_index(req.chapter_id, chunks)
     return {"ok": True, "count": len(chunks)}
 
+@app.post("/embeddings/clear")
+def embeddings_clear():
+    """Delete every persisted chapter index without unloading the embedding model."""
+    with EMBED_LOCK:
+        indexes = list_indexes()
+        deleted = 0
+        for chapter_id in indexes:
+            path = os.path.join(EMBED_INDEX_DIR, f"{chapter_id}.json")
+            try:
+                if os.path.isfile(path):
+                    os.remove(path)
+                    deleted += 1
+            except OSError as exc:
+                raise HTTPException(500, f"Не удалось удалить индекс главы {chapter_id}: {exc}")
+        return {"ok": True, "deleted": deleted, "indexes": indexes}
+
+
 @app.post("/embeddings/search")
 def embeddings_search(req: SearchReq):
     q_vec = embed_texts([req.query])[0]
@@ -896,7 +913,7 @@ def load_llm(path: str, quantization_mode: str = "none"):
         if device in ("cpu", "cuda", "mps", "xpu") and "device_map" not in kwargs:
             model = model.to(device)
         model.eval()
-        with LOCK:
+        with LLM_LOCK:
             LLM_STATE.update(
                 model=model, tokenizer=tokenizer, processor=processor, loaded=True,
                 path=path, device=strategy, adapter=adapter, profile=profile,
@@ -910,7 +927,7 @@ def load_llm(path: str, quantization_mode: str = "none"):
         except Exception:
             pass
         message = f"{type(exc).__name__}: {str(exc)[:500]}"
-        with LOCK:
+        with LLM_LOCK:
             LLM_STATE.update(error=message, loaded=False)
         return False
 
