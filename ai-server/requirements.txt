@@ -11,3 +11,4 @@ rembg>=2.0.57
 onnxruntime>=1.18
 huggingface_hub>=1.1.7
 bitsandbytes>=0.46
+uv>=0.7.0

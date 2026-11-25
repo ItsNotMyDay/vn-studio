@@ -336,6 +336,111 @@ export async function aiHealth(endpoint: string): Promise<AiHealth> {
   }
 }
 
+
+/* =============================== AI audio runtime =============================== */
+
+export interface AudioRuntimeHealth {
+  installed: boolean;
+  running: boolean;
+  model_loaded: boolean;
+  model?: string | null;
+  port: number;
+  stage: string;
+  error?: string | null;
+  log_tail?: string[];
+}
+
+export async function aiAudioHealth(endpoint: string): Promise<AudioRuntimeHealth> {
+  try {
+    return await jsonFetch(endpoint.replace(/\/+$/, '') + '/audio/health', undefined, 6000);
+  } catch (e: any) {
+    return {
+      installed: false,
+      running: false,
+      model_loaded: false,
+      port: 8766,
+      stage: 'AI-сервер недоступен',
+      error: e?.message ?? 'нет соединения',
+    };
+  }
+}
+
+export async function aiAudioInstall(endpoint: string): Promise<string> {
+  return aiStartJob(endpoint, '/audio/install', {});
+}
+
+export async function aiAudioStart(endpoint: string): Promise<string> {
+  return aiStartJob(endpoint, '/audio/start', {});
+}
+
+export async function aiAudioStop(endpoint: string): Promise<void> {
+  await jsonFetch(endpoint.replace(/\/+$/, '') + '/audio/stop', { method: 'POST' }, 20000);
+}
+
+export async function aiAudioPollJob(
+  endpoint: string,
+  jobId: string,
+  onProgress: (job: JobState) => void,
+  signal: AbortSignal,
+  timeoutMs = 2 * 60 * 60 * 1000,
+  intervalMs = 1200,
+): Promise<JobState> {
+  const base = endpoint.replace(/\/+$/, '');
+  const started = Date.now();
+  for (;;) {
+    if (signal.aborted) throw new DOMException('cancelled', 'AbortError');
+    if (Date.now() - started > timeoutMs) throw new Error('Превышено время ожидания аудиодвижка');
+    const response = await fetch(base + '/audio/jobs/' + jobId, { signal });
+    if (!response.ok) throw new Error('HTTP ' + response.status + ': ' + (await response.text()).slice(0, 500));
+    const job = await response.json() as JobState;
+    onProgress(job);
+    if (job.state === 'done' || job.state === 'error' || job.state === 'cancelled') return job;
+    await new Promise<void>((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        signal.removeEventListener('abort', abort);
+        resolve();
+      }, intervalMs);
+      const abort = () => {
+        window.clearTimeout(timer);
+        reject(new DOMException('cancelled', 'AbortError'));
+      };
+      signal.addEventListener('abort', abort, { once: true });
+    });
+  }
+}
+
+export async function aiAudioGenerate(
+  endpoint: string,
+  payload: {
+    prompt: string;
+    lyrics?: string;
+    duration: number;
+    bpm?: number;
+    instrumental: boolean;
+    mode: 'music' | 'effect';
+  },
+  onProgress: (job: JobState) => void,
+  signal: AbortSignal,
+): Promise<{ blob: Blob; filename: string }> {
+  const base = endpoint.replace(/\/+$/, '');
+  const start = await jsonFetch(base + '/audio/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }, 30000);
+  if (!start.job_id) throw new Error('Аудиосервер не вернул job_id');
+  const final = await aiAudioPollJob(base, start.job_id, onProgress, signal, 90 * 60 * 1000, 1800);
+  if (final.state !== 'done') throw new Error(final.message || 'Генерация аудио не удалась');
+  const fileResponse = await fetch(base + '/audio/jobs/' + start.job_id + '/file', { signal });
+  if (!fileResponse.ok) {
+    throw new Error('Не удалось получить аудио: HTTP ' + fileResponse.status + ' ' + (await fileResponse.text()).slice(0, 400));
+  }
+  return {
+    blob: await fileResponse.blob(),
+    filename: (final as any).result?.filename || 'ai-audio.wav',
+  };
+}
+
 export interface JobState {
   state: 'queued' | 'running' | 'done' | 'error' | 'cancelled';
   progress: number;
