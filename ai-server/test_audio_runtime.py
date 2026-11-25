@@ -96,6 +96,41 @@ class AudioRuntimeTests(unittest.TestCase):
             finally:
                 runtime.shutdown()
 
+    def test_api_server_command_uses_venv_python_module(self):
+        with tempfile.TemporaryDirectory() as temp:
+            runtime = AudioRuntime(base_dir=temp, port=18766)
+            try:
+                if __import__("os").name == "nt":
+                    python_path = runtime.repo_dir / ".venv" / "Scripts" / "python.exe"
+                else:
+                    python_path = runtime.repo_dir / ".venv" / "bin" / "python"
+                python_path.parent.mkdir(parents=True)
+                python_path.touch()
+
+                self.assertEqual(
+                    runtime._api_server_command(),
+                    [
+                        str(python_path),
+                        "-m",
+                        "acestep.api_server",
+                        "--host",
+                        "127.0.0.1",
+                        "--port",
+                        "18766",
+                    ],
+                )
+            finally:
+                runtime.shutdown()
+
+    def test_api_server_command_reports_missing_environment_python(self):
+        with tempfile.TemporaryDirectory() as temp:
+            runtime = AudioRuntime(base_dir=temp, port=18766)
+            try:
+                with self.assertRaisesRegex(RuntimeError, "Не найден Python"):
+                    runtime._api_server_command()
+            finally:
+                runtime.shutdown()
+
     def test_installed_detection_requires_project_and_venv_python(self):
         with tempfile.TemporaryDirectory() as temp:
             runtime = AudioRuntime(base_dir=temp, port=18766)
