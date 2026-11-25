@@ -15,6 +15,7 @@ interface AudioEditorProps {
   blob: Blob;
   filename: string;
   onApply: (blob: Blob) => void;
+  onRename: (name: string) => void;
 }
 
 interface PlaybackNodes {
@@ -313,7 +314,8 @@ function renderWav(
   );
 }
 
-export function AudioEditor({ blob, filename, onApply }: AudioEditorProps) {
+export function AudioEditor({ blob, filename, onApply, onRename }: AudioEditorProps) {
+  const [audioName, setAudioName] = useState(filename);
   const [buffer, setBuffer] = useState<AudioBuffer | null>(null);
   const [loadError, setLoadError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -337,6 +339,22 @@ export function AudioEditor({ blob, filename, onApply }: AudioEditorProps) {
   const playbackRef = useRef<PlaybackHandle | null>(null);
   const waveformRef = useRef<HTMLDivElement>(null);
   const isSeekingRef = useRef(false);
+
+  useEffect(() => {
+    setAudioName(filename);
+  }, [filename]);
+
+  const saveAudioName = () => {
+    const nextName = audioName.trim();
+    if (!nextName) {
+      setAudioName(filename);
+      return;
+    }
+    if (nextName !== filename) {
+      onRename(nextName);
+      setAudioName(nextName);
+    }
+  };
 
   const stopPlayback = useCallback(() => {
     const active = playbackRef.current;
@@ -744,7 +762,32 @@ export function AudioEditor({ blob, filename, onApply }: AudioEditorProps) {
       <div className="flex flex-wrap items-center gap-2">
         <AudioLines size={15} style={{ color: 'var(--accent)' }} />
         <span className="text-[11px] font-semibold uppercase tracking-wider">Редактор аудио</span>
-        <span className="text-[10px] text-mute truncate">{filename}</span>
+        <label className="flex items-center gap-1.5 min-w-0">
+          <span className="text-[9px] text-mute shrink-0">Имя</span>
+          <input
+            aria-label="Имя аудио"
+            title="Имя сохраняется после выхода из поля"
+            className="input !w-40 !py-1 !text-[10px]"
+            value={audioName}
+            maxLength={120}
+            onChange={event => setAudioName(event.target.value)}
+            onBlur={saveAudioName}
+            onKeyDown={event => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                event.currentTarget.blur();
+              }
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                const input = event.currentTarget;
+                input.value = filename;
+                setAudioName(filename);
+                input.blur();
+              }
+            }}
+            disabled={loading}
+          />
+        </label>
         <div className="flex-1" />
         <button
           type="button"
