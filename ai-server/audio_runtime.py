@@ -467,6 +467,31 @@ class AudioRuntime:
         with urllib.request.urlopen(req, timeout=timeout) as response:
             return json.loads(response.read().decode("utf-8"))
 
+    def _api_server_command(self) -> list[str]:
+        """Launch ACE-Step through its module, not the generated console-script wrapper.
+
+        On Windows the console-script shim can be missing even after uv
+        creates the project environment. The module entry point is part of the
+        checked-out source tree and runs with the exact venv interpreter.
+        """
+        if os.name == "nt":
+            python = self.repo_dir / ".venv" / "Scripts" / "python.exe"
+        else:
+            python = self.repo_dir / ".venv" / "bin" / "python"
+        if not python.is_file():
+            raise RuntimeError(
+                "Не найден Python в окружении ACE-Step. Повтори установку аудиодвижка."
+            )
+        return [
+            str(python),
+            "-m",
+            "acestep.api_server",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(self.port),
+        ]
+
     def _start_service(self, job_id: str) -> dict[str, Any]:
         if not self._installed():
             raise RuntimeError("Сначала установи аудиодвижок")
@@ -480,7 +505,6 @@ class AudioRuntime:
                 pass
             self.stop_service()
 
-        uv = self._uv_command(job_id)
         env = os.environ.copy()
         env["ACESTEP_API_HOST"] = "127.0.0.1"
         env["ACESTEP_API_PORT"] = str(self.port)
@@ -489,10 +513,7 @@ class AudioRuntime:
         env["ACESTEP_CONFIG_PATH"] = "acestep-v15-turbo"
         env["ACESTEP_LLM_BACKEND"] = "pt"
         env.pop("ACESTEP_API_KEY", None)
-        command = [
-            *uv, "run", "--project", str(self.repo_dir), "--no-sync",
-            "acestep-api", "--host", "127.0.0.1", "--port", str(self.port),
-        ]
+        command = self._api_server_command()
         self._append_log("Запуск ACE-Step 1.5 API")
         process = subprocess.Popen(
             command,
