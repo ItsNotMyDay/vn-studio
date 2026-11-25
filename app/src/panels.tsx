@@ -4,22 +4,24 @@ import {
   Search, GripVertical, Clapperboard, AlertTriangle, PanelLeft, PanelRight, RotateCcw, Shuffle,
   MessageSquare, GitBranch, Sigma, Image, Music, AudioLines, StopCircle, X, Settings, Upload, Sparkles,
   RefreshCw, Loader2, Server, Database, Eye, UserRound, Package, FolderOpen, KeyRound,
-  Cpu, ScanSearch, CheckCircle2
+  Cpu, ScanSearch, CheckCircle2, SlidersHorizontal
 } from 'lucide-react';
 import type { Node } from '@xyflow/react';
 import {
   useStore, KIND_META, VAR_TYPES, VAR_OPS, COND_OPS, ENTITY_EFFECTS,
-  type NodeKind, type Character, type VarType, type SpriteAsset, MOVE_EFFECTS
+  type NodeKind, type Character, type VarType, type SpriteAsset, type Track, MOVE_EFFECTS
 } from './store';
 import { characterVariableAlias, getVariableAutocomplete, type VariableAutocomplete } from './textVariables';
 import { BG_SWATCH } from './nodes';
-import { audioEnsure, audioPad, audioFile } from './audio';
-import { useAssetURL, getAssetURL } from './assets';
+import { audioEnsure, audioPad, audioFile, effectPlay } from './audio';
+import { useAssetURL, getAssetURL, getBlob, putBlob, revokeAssetURL } from './assets';
 import { launchPlayer, post } from './bus';
 import { AiSpriteDialog } from './AiSpriteDialog';
 import { AiBackgroundDialog } from './AiBackgroundDialog';
 import { AiAudioDialog, type AiAudioTarget } from './AiAudioDialog';
 import { QuantizationDialog } from './QuantizationDialog';
+import { AudioEditor } from './AudioEditor';
+import { SoundEffectBuilder } from './SoundEffectBuilder';
 import {
   loadAiSettings, saveAiSettings, aiHealth, llmHealth, embeddingsHealth, embeddingsClear, aiListModels,
   aiLoadJob, llmLoadJob, aiUnloadModel, llmUnload, aiCancelJob,
@@ -66,6 +68,10 @@ function restoreTrack() {
 
 function previewTrack(t: any) {
   audioEnsure();
+  if (t.mode === 'effect') {
+    effectPlay(t);
+    return;
+  }
   if (t.assetId) {
     getAssetURL(t.assetId).then(u => { if (u) { audioFile(u); setTimeout(restoreTrack, 2500); } });
   } else {
@@ -98,28 +104,111 @@ function BgRow({ b }: any) {
   );
 }
 
-function TrackRow({ t }: any) {
+function TrackAudioEditorModal({ track, onClose }: { track: Track; onClose: () => void }) {
   const s = useStore();
+  const [blob, setBlob] = useState<Blob | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let alive = true;
+    if (!track.assetId) {
+      setError('У этого звука нет сохранённого файла для редактирования.');
+      setLoading(false);
+      return () => { alive = false; };
+    }
+    getBlob(track.assetId)
+      .then(value => {
+        if (!alive) return;
+        if (value) setBlob(value);
+        else setError('Файл не найден в локальном хранилище ассетов.');
+        setLoading(false);
+      })
+      .catch(reason => {
+        if (!alive) return;
+        setError(reason instanceof Error ? reason.message : 'Не удалось открыть аудиоассет.');
+        setLoading(false);
+      });
+    return () => { alive = false; };
+  }, [track.assetId]);
+
+  const saveEditedAudio = async (nextBlob: Blob) => {
+    if (!track.assetId) return;
+    setSaving(true);
+    setError('');
+    try {
+      await putBlob(track.assetId, nextBlob);
+      revokeAssetURL(track.assetId);
+      setBlob(nextBlob);
+      s.toast('Изменения аудиоассета сохранены');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Не удалось сохранить изменения аудио.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[96] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="panel border border-ink-600 rounded-2xl w-[min(920px,96vw)] max-h-[92vh] overflow-y-auto shadow-2xl" onClick={event => event.stopPropagation()}>
+        <div className="sticky top-0 z-10 flex items-center gap-2 px-4 py-3 border-b border-ink-700 panel">
+          <SlidersHorizontal size={15} style={{ color: 'var(--accent)' }} />
+          <span className="font-display font-bold text-[12px] uppercase tracking-wider">Редактирование аудиоассета</span>
+          <span className="text-[11px] text-mute truncate">{track.name}</span>
+          <div className="flex-1" />
+          <button className="btn !px-2" onClick={onClose} title="Закрыть"><X size={14} /></button>
+        </div>
+        <div className="p-4 space-y-3">
+          {loading && <div className="text-[11px] text-mute py-4">Открываем аудиофайл…</div>}
+          {error && <div className="text-[11px] text-danger rounded-lg border border-danger/40 bg-danger/10 px-3 py-2">{error}</div>}
+          {blob && <AudioEditor blob={blob} filename={track.name} onApply={saveEditedAudio} />}
+          {saving && <div className="text-[10px] text-mute">Сохраняем изменённый файл в ассеты…</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TrackRow({ t }: { t: Track }) {
+  const s = useStore();
+  const [editorOpen, setEditorOpen] = useState(false);
+  const isEffect = t.mode === 'effect';
   const add = () => {
     const rf = s.rf;
     const pos = rf ? rf.screenToFlowPosition({ x: innerWidth / 2, y: innerHeight / 2 }) : { x: 200, y: 200 };
-    s.addNode('music', { x: pos.x - 110, y: pos.y - 30 }, { track: t.id, mode: 'music' });
+    s.addNode('music', { x: pos.x - 110, y: pos.y - 30 }, { track: t.id, mode: isEffect ? 'effect' : 'music' });
   };
   return (
-    <div className="group flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-ink-800">
-      <span className="eq shrink-0">
-        <i style={{ background: t.color }} /><i style={{ background: t.color }} />
-        <i style={{ background: t.color }} /><i style={{ background: t.color }} />
-      </span>
-      <span className="flex-1 truncate text-[12px]">{t.name}{t.assetId ? ' · файл' : ''}</span>
-      <button className="btn !px-2 !py-1" title="Прослушать" onClick={() => previewTrack(t)}><Play size={12} /></button>
-      {t.assetId && (
-        <button className="opacity-0 group-hover:opacity-100 text-mute hover:text-danger" title="Удалить трек" onClick={() => s.deleteTrack(t.id)}>
-          <Trash2 size={12} />
+    <>
+      <div className="group flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-ink-800">
+        <span className="eq shrink-0">
+          <i style={{ background: t.color }} /><i style={{ background: t.color }} />
+          <i style={{ background: t.color }} /><i style={{ background: t.color }} />
+        </span>
+        <button
+          type="button"
+          className="flex-1 min-w-0 truncate text-left text-[12px] hover:text-paper"
+          title={t.assetId ? 'Нажми, чтобы открыть аудиоредактор' : t.name}
+          onClick={() => t.assetId && setEditorOpen(true)}
+        >
+          {t.name}{t.assetId ? ' · файл' : ''}
         </button>
-      )}
-      <button className="btn !px-2 !py-1" title="Добавить ноду музыки" onClick={add}><Plus size={12} /></button>
-    </div>
+        {t.assetId && (
+          <button className="btn !px-2 !py-1" title="Редактировать аудио" onClick={() => setEditorOpen(true)}>
+            <SlidersHorizontal size={12} />
+          </button>
+        )}
+        <button className="btn !px-2 !py-1" title="Прослушать" onClick={() => previewTrack(t)}><Play size={12} /></button>
+        {t.assetId && (
+          <button className="opacity-0 group-hover:opacity-100 text-mute hover:text-danger" title="Удалить аудио" onClick={() => s.deleteTrack(t.id)}>
+            <Trash2 size={12} />
+          </button>
+        )}
+        <button className="btn !px-2 !py-1" title={isEffect ? 'Добавить ноду звукового эффекта' : 'Добавить ноду музыки'} onClick={add}><Plus size={12} /></button>
+      </div>
+      {editorOpen && t.assetId && <TrackAudioEditorModal track={t} onClose={() => setEditorOpen(false)} />}
+    </>
   );
 }
 
@@ -227,6 +316,7 @@ export function Toolbar() {
 export function Sidebar() {
   const s = useStore();
   const [bgAi, setBgAi] = useState(false);
+  const [soundBuilderOpen, setSoundBuilderOpen] = useState(false);
   const q = s.search.toLowerCase();
   const scenes = useMemo(() => {
     const list = s.project.scenes.filter(sc => sc.name.toLowerCase().includes(q));
@@ -235,6 +325,8 @@ export function Sidebar() {
   const chars = s.project.characters.filter(c => c.name.toLowerCase().includes(q));
   const bgs = s.project.backgrounds.filter(b => b.name.toLowerCase().includes(q));
   const trs = s.project.tracks.filter(t => t.name.toLowerCase().includes(q));
+  const musicTracks = trs.filter(t => t.mode !== 'effect');
+  const soundTracks = trs.filter(t => t.mode === 'effect');
   const sprs = s.project.sprites.filter(sp => sp.name.toLowerCase().includes(q));
   const dragIdx = useRef<number | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -376,8 +468,17 @@ export function Sidebar() {
                 <Upload size={12} /> Загрузить
               </UploadButton>
             </div>
-            {trs.map(t => <TrackRow key={t.id} t={t} />)}
-            {trs.length === 0 && <div className="text-[11px] text-mute px-2 py-1.5">Треки не найдены.</div>}
+            {musicTracks.map(t => <TrackRow key={t.id} t={t} />)}
+            {musicTracks.length === 0 && <div className="text-[11px] text-mute px-2 py-1.5">Музыка не найдена.</div>}
+
+            <div className="flex items-center justify-between px-1 pt-2">
+              <span className="text-[10px] uppercase tracking-wider text-mute">Звуковые эффекты</span>
+              <button className="btn !px-2 !py-1" title="Создать щелчок, уведомление или тон" onClick={() => setSoundBuilderOpen(true)}>
+                <Sparkles size={12} /> Создать звук
+              </button>
+            </div>
+            {soundTracks.map(t => <TrackRow key={t.id} t={t} />)}
+            {soundTracks.length === 0 && <div className="text-[11px] text-mute px-2 py-1.5">Коротких звуков пока нет. Создай первый сигнал.</div>}
 
             <div className="flex items-center justify-between px-1 pt-2">
               <span className="text-[10px] uppercase tracking-wider text-mute">Спрайты</span>
@@ -426,6 +527,7 @@ export function Sidebar() {
       </div>
 
       <AiBackgroundDialog open={bgAi} onClose={() => setBgAi(false)} />
+      {soundBuilderOpen && <SoundEffectBuilder open={soundBuilderOpen} onClose={() => setSoundBuilderOpen(false)} />}
     </div>
   );
 }

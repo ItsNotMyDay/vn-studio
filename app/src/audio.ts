@@ -272,3 +272,151 @@ export function audioFile(url: string | null) {
   audioEnsure();
   startMusicFile(url);
 }
+
+/* ----------------------- procedural sound file generator ------------------- */
+
+export type EffectPattern = 'single' | 'double' | 'ascending' | 'descending' | 'success' | 'error';
+
+export interface ProceduralEffectOptions {
+  waveform: OscillatorType;
+  pattern: EffectPattern;
+  frequency: number;
+  endFrequency: number;
+  durationMs: number;
+  volume: number;
+  attackMs: number;
+  releaseMs: number;
+  repeats: number;
+  gapMs: number;
+  noise: number;
+}
+
+function effectWaveToWav(buffer: AudioBuffer): Blob {
+  const channels = 2;
+  const frames = buffer.length;
+  const bytesPerSample = 2;
+  const dataSize = frames * channels * bytesPerSample;
+  const output = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(output);
+  const write = (offset: number, value: string) => {
+    for (let i = 0; i < value.length; i += 1) view.setUint8(offset + i, value.charCodeAt(i));
+  };
+  write(0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  write(8, 'WAVE');
+  write(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, channels, true);
+  view.setUint32(24, buffer.sampleRate, true);
+  view.setUint32(28, buffer.sampleRate * channels * bytesPerSample, true);
+  view.setUint16(32, channels * bytesPerSample, true);
+  view.setUint16(34, 16, true);
+  write(36, 'data');
+  view.setUint32(40, dataSize, true);
+
+  let offset = 44;
+  const left = buffer.getChannelData(0);
+  const right = buffer.getChannelData(1);
+  for (let frame = 0; frame < frames; frame += 1) {
+    for (const value of [left[frame], right[frame]]) {
+      const sample = Math.max(-1, Math.min(1, value));
+      view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+      offset += bytesPerSample;
+    }
+  }
+  return new Blob([output], { type: 'audio/wav' });
+}
+
+/**
+ * Render a short UI sound from the same Web Audio oscillator/noise primitives
+ * used by audioTick() and playEffectSynth(). The returned WAV is a normal asset.
+ */
+export async function renderProceduralEffect(options: ProceduralEffectOptions): Promise<Blob> {
+  const duration = Math.max(0.02, Math.min(2.5, options.durationMs / 1000));
+  const repeats = Math.max(1, Math.min(5, Math.round(options.repeats)));
+  const gap = Math.max(0, Math.min(0.8, options.gapMs / 1000));
+  const baseFrequency = Math.max(30, Math.min(4000, options.frequency));
+  const endFrequency = Math.max(30, Math.min(6000, options.endFrequency));
+  const volume = Math.max(0, Math.min(100, options.volume)) / 100;
+  const noiseAmount = Math.max(0, Math.min(100, options.noise)) / 100;
+  const attack = Math.max(0, Math.min(duration * 0.8, options.attackMs / 1000));
+  const release = Math.max(0, Math.min(duration * 0.9, options.releaseMs / 1000));
+  const patterns: Record<EffectPattern, number[]> = {
+    single: [1],
+    double: [1, 1],
+    ascending: [1, 1.25],
+    descending: [1.25, 1],
+    success: [0.8, 1, 1.25],
+    error: [1, 0.72],
+  };
+  const ratios = patterns[options.pattern] ?? patterns.single;
+  const eventCount = ratios.length * repeats;
+  const totalDuration = eventCount * duration + Math.max(0, eventCount - 1) * gap + 0.03;
+  const sampleRate = 44100;
+  const frames = Math.max(1, Math.ceil(totalDuration * sampleRate));
+  const offline = new OfflineAudioContext(2, frames, sampleRate);
+  const masterGain = offline.createGain();
+  masterGain.gain.value = volume * 0.36;
+  masterGain.connect(offline.destination);
+
+  let eventIndex = 0;
+  for (let repetition = 0; repetition < repeats; repetition += 1) {
+    for (const ratio of ratios) {
+      const startAt = eventIndex * (duration + gap);
+      const oscillator = offline.createOscillator();
+      const envelope = offline.createGain();
+      oscillator.type = options.waveform;
+      const noteStart = baseFrequency * ratio;
+      const noteEnd = Math.max(30, endFrequency * ratio);
+      oscillator.frequency.setValueAtTime(noteStart, startAt);
+      if (Math.abs(noteEnd - noteStart) > 1) {
+        oscillator.frequency.exponentialRampToValueAtTime(noteEnd, startAt + duration);
+      }
+
+      const safeAttack = Math.min(attack, duration * 0.7);
+      const safeRelease = Math.min(release, Math.max(0, duration - safeAttack));
+      const peak = 1;
+      envelope.gain.setValueAtTime(0.0001, startAt);
+      if (safeAttack > 0.001) {
+        envelope.gain.exponentialRampToValueAtTime(peak, startAt + safeAttack);
+      } else {
+        envelope.gain.setValueAtTime(peak, startAt + 0.001);
+      }
+      envelope.gain.setValueAtTime(peak, Math.max(startAt + safeAttack, startAt + duration - safeRelease));
+      envelope.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
+      oscillator.connect(envelope);
+      envelope.connect(masterGain);
+      oscillator.start(startAt);
+      oscillator.stop(startAt + duration + 0.005);
+
+      if (noiseAmount > 0.001) {
+        const noiseSource = offline.createBufferSource();
+        const noiseFrames = Math.max(1, Math.ceil(duration * sampleRate));
+        const noiseBuffer = offline.createBuffer(1, noiseFrames, sampleRate);
+        const data = noiseBuffer.getChannelData(0);
+        for (let i = 0; i < noiseFrames; i += 1) {
+          data[i] = (Math.random() * 2 - 1) * (1 - i / noiseFrames);
+        }
+        noiseSource.buffer = noiseBuffer;
+        const highpass = offline.createBiquadFilter();
+        highpass.type = 'highpass';
+        highpass.frequency.value = Math.max(700, Math.min(5000, noteStart * 1.4));
+        const noiseGain = offline.createGain();
+        const noisePeak = noiseAmount * 0.45;
+        noiseGain.gain.setValueAtTime(0.0001, startAt);
+        noiseGain.gain.linearRampToValueAtTime(noisePeak, startAt + Math.min(0.003, duration / 4));
+        noiseGain.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
+        noiseSource.connect(highpass);
+        highpass.connect(noiseGain);
+        noiseGain.connect(masterGain);
+        noiseSource.start(startAt);
+        noiseSource.stop(startAt + duration + 0.005);
+      }
+      eventIndex += 1;
+    }
+  }
+
+  const rendered = await offline.startRendering();
+  return effectWaveToWav(rendered);
+}
