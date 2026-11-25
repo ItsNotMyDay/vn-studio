@@ -3,6 +3,7 @@ import tempfile
 import unittest
 import zipfile
 import sys
+import urllib.parse
 from pathlib import Path
 from subprocess import CompletedProcess
 from unittest.mock import patch
@@ -26,6 +27,17 @@ class AudioRuntimeTests(unittest.TestCase):
 
     def test_parses_generated_audio_file_from_object(self):
         self.assertEqual(parse_generated_audio_path({"path": "/tmp/result.wav"}), "/tmp/result.wav")
+
+    def test_parses_generated_audio_download_url(self):
+        audio_path = r"C:\Users\Test User\audio-runtime\tmp\api_audio\result.wav"
+        audio_url = "/v1/audio?path=" + urllib.parse.quote(audio_path, safe="")
+        result = json.dumps([{"file": audio_url}])
+        self.assertEqual(parse_generated_audio_path(result), audio_path)
+
+    def test_parses_absolute_generated_audio_download_url(self):
+        audio_path = "/opt/acestep/tmp/api_audio/result.wav"
+        audio_url = "http://127.0.0.1:8766/v1/audio?path=" + urllib.parse.quote(audio_path, safe="")
+        self.assertEqual(parse_generated_audio_path({"file": audio_url}), audio_path)
 
     def test_rejects_missing_generated_audio_path(self):
         with self.assertRaises(RuntimeError):
