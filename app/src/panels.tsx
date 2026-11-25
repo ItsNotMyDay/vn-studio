@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Play, Square, Undo2, Redo2, Save, Download, FileText, Volume2, VolumeX, Plus, Trash2,
   Search, GripVertical, Clapperboard, AlertTriangle, PanelLeft, PanelRight, RotateCcw, Shuffle,
-  MessageSquare, GitBranch, Sigma, Image, Music, StopCircle, X, Settings, Upload, Sparkles,
+  MessageSquare, GitBranch, Sigma, Image, Music, AudioLines, StopCircle, X, Settings, Upload, Sparkles,
   RefreshCw, Loader2, Server, Database, Eye, UserRound, Package, FolderOpen, KeyRound,
   Cpu, ScanSearch, CheckCircle2
 } from 'lucide-react';
