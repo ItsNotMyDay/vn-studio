@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -97,9 +98,19 @@ class AudioRuntime:
         self._active_process: subprocess.Popen | None = None
         self._shutdown = False
 
+    @staticmethod
+    def _is_http_access_log(line: str) -> bool:
+        """Identify Uvicorn access lines that otherwise hide model diagnostics."""
+        if not line.startswith("INFO:") or ' - "' not in line:
+            return False
+        return any(
+            f' - "{method} ' in line
+            for method in ("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD")
+        )
+
     def _append_log(self, line: str) -> None:
         clean = str(line).rstrip()
-        if not clean:
+        if not clean or self._is_http_access_log(clean):
             return
         with self._lock:
             self._log_tail.append(clean[-500:])
@@ -538,6 +549,72 @@ class AudioRuntime:
             str(self.port),
         ]
 
+    def _detect_gpu_memory_gb(self) -> float | None:
+        """Read total CUDA VRAM using the exact Python environment ACE-Step runs in."""
+        try:
+            python = self._environment_python()
+            probe = subprocess.run(
+                [
+                    str(python),
+                    "-c",
+                    (
+                        "import torch; "
+                        "print(torch.cuda.get_device_properties(0).total_memory / (1024 ** 3) "
+                        "if torch.cuda.is_available() else 0)"
+                    ),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=45,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired, RuntimeError) as exc:
+            self._append_log(f"Не удалось определить VRAM для профиля ACE-Step: {exc}")
+            return None
+        if probe.returncode != 0:
+            detail = (probe.stderr or probe.stdout or "").strip()[-500:]
+            self._append_log(f"Не удалось определить VRAM для профиля ACE-Step: {detail}")
+            return None
+        try:
+            memory_gb = float((probe.stdout or "").strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            self._append_log("PyTorch вернул некорректное значение объёма VRAM")
+            return None
+        return memory_gb if memory_gb > 0 else None
+
+    def _apply_low_vram_offload_defaults(self, env: dict[str, str]) -> None:
+        """Match ACE-Step's Tier 1-4 DiT CPU-offload default on GPUs up to 12GB."""
+        # Preserve an explicit setting supplied by the user or parent process.
+        if "ACESTEP_OFFLOAD_DIT_TO_CPU" in env:
+            return
+        memory_gb = self._detect_gpu_memory_gb()
+        if memory_gb is not None and memory_gb <= 12.0:
+            env["ACESTEP_OFFLOAD_DIT_TO_CPU"] = "true"
+            self._append_log(
+                f"Обнаружено {memory_gb:.1f} ГБ VRAM: включён offload DiT на CPU "
+                "для освобождения видеопамяти перед VAE-декодированием"
+            )
+
+    @staticmethod
+    def _generation_progress(message: str) -> tuple[float, str]:
+        """Translate ACE-Step's last log message into a useful VN Studio phase."""
+        lower = message.lower()
+        if "moving vae to cpu" in lower or "[_decode_on_cpu]" in lower:
+            return 0.84, "VAE: декодирование аудио на CPU (не хватает свободной VRAM)"
+
+        if "[tiled_decode]" in lower:
+            chunk_match = re.search(r"chunk_size\\s*=\\s*(\\d+)", message, re.IGNORECASE)
+            chunk_info = f", блок {chunk_match.group(1)}" if chunk_match else ""
+            if "reduced overlap" in lower:
+                return 0.82, f"VAE: декодирование аудио блоками{chunk_info} (настройка overlap)"
+            return 0.82, f"VAE: декодирование аудио блоками{chunk_info}"
+
+        if "model generation completed" in lower or "decoding latents" in lower:
+            return 0.80, "Модель завершила генерацию; декодирование латентов через VAE"
+        if "decoding audio" in lower:
+            return 0.80, "VAE: преобразование латентов в аудио"
+        return 0.12, message[:160] if message else "ACE-Step генерирует аудио"
+
     def _start_service(self, job_id: str) -> dict[str, Any]:
         if not self._installed():
             raise RuntimeError("Сначала установи аудиодвижок")
@@ -569,6 +646,7 @@ class AudioRuntime:
         env["ACESTEP_INIT_LLM"] = "false"
         env["ACESTEP_CONFIG_PATH"] = "acestep-v15-turbo"
         env["ACESTEP_LLM_BACKEND"] = "pt"
+        self._apply_low_vram_offload_defaults(env)
         env.pop("ACESTEP_API_KEY", None)
         command = self._api_server_command()
         self._append_log("Запуск ACE-Step 1.5 API")
@@ -776,7 +854,8 @@ class AudioRuntime:
                 if state == 2:
                     detail = item.get("result") or item.get("error") or message
                     raise RuntimeError(f"ACE-Step не смог сгенерировать аудио: {detail}")
-                self._update_job(job_id, progress=0.12, stage=message[:160])
+                progress, stage = self._generation_progress(message)
+                self._update_job(job_id, progress=progress, stage=stage)
                 time.sleep(2)
             else:
                 raise TimeoutError("Время ожидания генерации аудио истекло")
