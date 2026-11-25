@@ -66,7 +66,7 @@ export interface Character {
   isNarrator?: boolean;
 }
 export interface Background { id: string; name: string; kind: 'park' | 'cafe' | 'city' | 'room'; assetId?: string; }
-export interface Track { id: string; name: string; freqs: number[]; color: string; assetId?: string; }
+export interface Track { id: string; name: string; freqs: number[]; color: string; assetId?: string; mode?: 'music' | 'effect'; }
 export interface SpriteAsset { id: string; name: string; assetId: string; }
 export interface ChoiceOption { id: string; text: string; }
 export interface ChoiceCondition { id: string; op: CondOp; value: string; }
@@ -545,7 +545,7 @@ interface Store {
 
   uploadBackground: (file: File) => Promise<void>;
   uploadTrack: (file: File) => Promise<void>;
-  addTrackBlob: (name: string, blob: Blob) => Promise<string>;
+  addTrackBlob: (name: string, blob: Blob, mode?: 'music' | 'effect') => Promise<string>;
   uploadSprite: (charId: string, expression: string, file: File) => Promise<void>;
   applySpriteBlob: (charId: string, expression: string, blob: Blob, source: 'ai' | 'procedural' | 'upload', meta?: { prompt?: string; seed?: number; model?: string }) => Promise<void>;
   deleteBackground: (id: string) => void;
@@ -1295,7 +1295,7 @@ export const useStore = create<Store>((set, get) => {
         get().toast(`Трек загружен: ${file.name}`);
       } catch { get().toast('Не удалось сохранить файл'); }
     },
-    addTrackBlob: async (name, blob) => {
+    addTrackBlob: async (name, blob, mode = 'music') => {
       const assetId = `tr_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
       try {
         await putBlob(assetId, blob);
@@ -1304,7 +1304,7 @@ export const useStore = create<Store>((set, get) => {
         set(s => ({
           project: {
             ...s.project,
-            tracks: [...s.project.tracks, { id: trackId, name: name.trim() || 'AI аудио', freqs: [], color: '#9dff57', assetId }],
+            tracks: [...s.project.tracks, { id: trackId, name: name.trim() || (mode === 'effect' ? 'Звуковой эффект' : 'AI аудио'), freqs: [], color: '#9dff57', assetId, mode }],
           },
         }));
         get().toast('AI-аудио добавлено в ассеты');
