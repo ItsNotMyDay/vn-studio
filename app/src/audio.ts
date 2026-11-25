@@ -291,6 +291,50 @@ export interface ProceduralEffectOptions {
   noise: number;
 }
 
+export type SoundPreset = 'click' | 'pop' | 'notification' | 'success' | 'error' | 'alert' | 'tone';
+
+export const SOUND_EFFECT_PRESETS: Record<SoundPreset, {
+  title: string;
+  name: string;
+  settings: ProceduralEffectOptions;
+}> = {
+  click: {
+    title: 'Мягкий щелчок',
+    name: 'Щелчок интерфейса',
+    settings: { waveform: 'square', pattern: 'single', frequency: 1450, endFrequency: 760, durationMs: 48, volume: 72, attackMs: 1, releaseMs: 42, repeats: 1, gapMs: 70, noise: 32 },
+  },
+  pop: {
+    title: 'Короткий pop',
+    name: 'Pop',
+    settings: { waveform: 'sine', pattern: 'single', frequency: 620, endFrequency: 150, durationMs: 150, volume: 86, attackMs: 2, releaseMs: 130, repeats: 1, gapMs: 80, noise: 22 },
+  },
+  notification: {
+    title: 'Уведомление',
+    name: 'Уведомление',
+    settings: { waveform: 'sine', pattern: 'ascending', frequency: 620, endFrequency: 680, durationMs: 145, volume: 80, attackMs: 8, releaseMs: 120, repeats: 1, gapMs: 65, noise: 0 },
+  },
+  success: {
+    title: 'Успешное действие',
+    name: 'Успешное действие',
+    settings: { waveform: 'sine', pattern: 'success', frequency: 560, endFrequency: 640, durationMs: 125, volume: 78, attackMs: 8, releaseMs: 105, repeats: 1, gapMs: 42, noise: 0 },
+  },
+  error: {
+    title: 'Ошибка',
+    name: 'Сигнал ошибки',
+    settings: { waveform: 'triangle', pattern: 'error', frequency: 390, endFrequency: 310, durationMs: 170, volume: 78, attackMs: 4, releaseMs: 150, repeats: 1, gapMs: 75, noise: 0 },
+  },
+  alert: {
+    title: 'Предупреждение',
+    name: 'Предупреждение',
+    settings: { waveform: 'square', pattern: 'double', frequency: 880, endFrequency: 740, durationMs: 105, volume: 65, attackMs: 2, releaseMs: 90, repeats: 2, gapMs: 115, noise: 0 },
+  },
+  tone: {
+    title: 'Тональный сигнал',
+    name: 'Тональный сигнал',
+    settings: { waveform: 'sine', pattern: 'single', frequency: 440, endFrequency: 440, durationMs: 420, volume: 72, attackMs: 12, releaseMs: 90, repeats: 1, gapMs: 100, noise: 0 },
+  },
+};
+
 function effectWaveToWav(buffer: AudioBuffer): Blob {
   const channels = 2;
   const frames = buffer.length;
