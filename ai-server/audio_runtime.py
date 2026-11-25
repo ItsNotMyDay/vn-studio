@@ -431,7 +431,17 @@ class AudioRuntime:
                         stage += "; дополнительная LM загружена"
                     self._update_job(job_id, progress=last_stage, stage=stage)
             except (OSError, urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError):
-                pass
+                # ACE-Step performs its eager model initialization before its
+                # HTTP listener becomes available. Surface its captured startup
+                # log while /health is still unreachable.
+                with self._lock:
+                    latest_log = self._log_tail[-1] if self._log_tail else ""
+                if latest_log:
+                    self._update_job(
+                        job_id,
+                        progress=last_stage,
+                        stage=latest_log[-160:],
+                    )
             time.sleep(2)
             last_stage = min(0.9, last_stage + 0.002)
         self.stop_service()
