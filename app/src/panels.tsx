@@ -1229,7 +1229,6 @@ export function Inspector() {
                 ))}
               </div>
             </div>
-            <button className="btn w-full justify-center" onClick={s.resetDemo}><RotateCcw size={13} /> Восстановить демо-проект</button>
           </div>
         )}
       </div>
