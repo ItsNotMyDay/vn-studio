@@ -537,7 +537,7 @@ export function AudioEditor({ blob, filename, onApply }: AudioEditorProps) {
       source.buffer = buffer;
       const duration = trimEnd - trimStart;
       const nodes = createPlaybackGraph(context, source, {
-        bass, mid, treble, pan, compression, volume, normalizeGain,
+        bass, mid, treble, pan, compression, volume, normalizeGain: normalizationGain,
       });
       const active: PlaybackHandle = {
         context,
