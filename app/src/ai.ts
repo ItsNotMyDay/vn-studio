@@ -707,6 +707,16 @@ export async function embeddingsIndex(endpoint: string, chapterId: string, chunk
   }
 }
 
+export async function embeddingsClear(endpoint: string): Promise<{ ok: boolean; deleted?: number; error?: string }> {
+  try {
+    return await jsonFetch(`${endpoint.replace(/\/+$/, '')}/embeddings/clear`, {
+      method: 'POST',
+    }, 20000);
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? 'Не удалось очистить контекст' };
+  }
+}
+
 export async function embeddingsSearch(
   endpoint: string,
   query: string,

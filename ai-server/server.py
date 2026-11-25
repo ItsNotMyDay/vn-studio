@@ -141,7 +141,8 @@ def embeddings_load(req: Optional[dict] = None):
 
 @app.get("/embeddings/health")
 def embeddings_health():
-    return {"loaded": EMBED_STATE["loaded"], "indexes": list_indexes(), "error": EMBED_STATE["error"]}
+    with EMBED_LOCK:
+        return {"loaded": EMBED_STATE["loaded"], "indexes": list_indexes(), "error": EMBED_STATE["error"]}
 
 @app.post("/embeddings/unload")
 def embeddings_unload():
@@ -153,25 +154,45 @@ def embeddings_unload():
 
 @app.post("/embeddings/index")
 def embeddings_index(req: IndexReq):
-    texts = [c["text"] for c in req.chunks]
-    vecs = embed_texts(texts)
-    chunks = [{"text": c["text"], "meta": c.get("meta", {}), "vec": v} for c, v in zip(req.chunks, vecs)]
-    save_index(req.chapter_id, chunks)
-    return {"ok": True, "count": len(chunks)}
+    # Keep indexing atomic with respect to the clear operation.
+    with EMBED_LOCK:
+        texts = [c["text"] for c in req.chunks]
+        vecs = embed_texts(texts)
+        chunks = [{"text": c["text"], "meta": c.get("meta", {}), "vec": v} for c, v in zip(req.chunks, vecs)]
+        save_index(req.chapter_id, chunks)
+        return {"ok": True, "count": len(chunks)}
+
+@app.post("/embeddings/clear")
+def embeddings_clear():
+    """Delete every persisted chapter index without unloading the embedding model."""
+    with EMBED_LOCK:
+        indexes = list_indexes()
+        deleted = 0
+        for chapter_id in indexes:
+            path = os.path.join(EMBED_INDEX_DIR, f"{chapter_id}.json")
+            try:
+                if os.path.isfile(path):
+                    os.remove(path)
+                    deleted += 1
+            except OSError as exc:
+                raise HTTPException(500, f"Не удалось удалить индекс главы {chapter_id}: {exc}")
+        return {"ok": True, "deleted": deleted, "indexes": indexes}
+
 
 @app.post("/embeddings/search")
 def embeddings_search(req: SearchReq):
-    q_vec = embed_texts([req.query])[0]
-    results = []
-    for cid in list_indexes():
-        if cid == req.exclude_chapter:
-            continue
-        chunks = load_index(cid)
-        for ch in chunks:
-            score = cosine_sim(q_vec, ch["vec"])
-            results.append({"chapter_id": cid, "text": ch["text"], "meta": ch.get("meta", {}), "score": score})
-    results.sort(key=lambda x: x["score"], reverse=True)
-    return {"results": results[:req.top_k]}
+    with EMBED_LOCK:
+        q_vec = embed_texts([req.query])[0]
+        results = []
+        for cid in list_indexes():
+            if cid == req.exclude_chapter:
+                continue
+            chunks = load_index(cid)
+            for ch in chunks:
+                score = cosine_sim(q_vec, ch["vec"])
+                results.append({"chapter_id": cid, "text": ch["text"], "meta": ch.get("meta", {}), "score": score})
+        results.sort(key=lambda x: x["score"], reverse=True)
+        return {"results": results[:req.top_k]}
 
 def _llm_load_with_progress(job):
     import contextlib
@@ -896,7 +917,7 @@ def load_llm(path: str, quantization_mode: str = "none"):
         if device in ("cpu", "cuda", "mps", "xpu") and "device_map" not in kwargs:
             model = model.to(device)
         model.eval()
-        with LOCK:
+        with LLM_LOCK:
             LLM_STATE.update(
                 model=model, tokenizer=tokenizer, processor=processor, loaded=True,
                 path=path, device=strategy, adapter=adapter, profile=profile,
@@ -910,7 +931,7 @@ def load_llm(path: str, quantization_mode: str = "none"):
         except Exception:
             pass
         message = f"{type(exc).__name__}: {str(exc)[:500]}"
-        with LOCK:
+        with LLM_LOCK:
             LLM_STATE.update(error=message, loaded=False)
         return False
 

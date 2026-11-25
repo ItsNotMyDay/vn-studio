@@ -20,7 +20,7 @@ import { AiSpriteDialog } from './AiSpriteDialog';
 import { AiBackgroundDialog } from './AiBackgroundDialog';
 import { QuantizationDialog } from './QuantizationDialog';
 import {
-  loadAiSettings, saveAiSettings, aiHealth, llmHealth, embeddingsHealth, aiListModels,
+  loadAiSettings, saveAiSettings, aiHealth, llmHealth, embeddingsHealth, embeddingsClear, aiListModels,
   aiLoadJob, llmLoadJob, aiUnloadModel, llmUnload, aiCancelJob,
   aiDownloadHfModel, openAiListModels, openAiTestConnection, normalizeOpenAiBase,
   aiSystemDiagnostics, aiModelCompatibility,
@@ -1410,6 +1410,7 @@ function AiModelsPanel() {
   const [compatibilityOpen, setCompatibilityOpen] = useState(false);
   const [compatibilityLoading, setCompatibilityLoading] = useState(false);
   const [quantizationTarget, setQuantizationTarget] = useState<null | 'image' | 'llm'>(null);
+  const [clearContextLoading, setClearContextLoading] = useState(false);
   const ep = (s.director.aiEndpoint || 'http://127.0.0.1:8765').replace(/\/+$/, '');
 
   useEffect(() => {
@@ -1819,6 +1820,29 @@ function AiModelsPanel() {
           {embH?.loaded ? 'загружены' : 'не загружены'}
         </span>
         <span className="chip border-ink-600 text-mute">{embH?.indexes?.length ?? 0} глав в индексе</span>
+        <button
+          className="btn btn-danger"
+          disabled={clearContextLoading || !(embH?.indexes?.length)}
+          title="Удалить все проиндексированные сцены со всех проектов на этом AI-сервере"
+          onClick={async () => {
+            const count = embH?.indexes?.length ?? 0;
+            if (!count || !window.confirm(`Удалить все проиндексированные сцены (${count} глав) с AI-сервера? Это действие нельзя отменить.`)) return;
+            setClearContextLoading(true);
+            try {
+              const result = await embeddingsClear(ep);
+              if (!result.ok) throw new Error(result.error || 'Не удалось очистить контекст');
+              setEmbH(await embeddingsHealth(ep));
+              s.toast(`Контекст очищен: удалено индексов — ${result.deleted ?? 0}`);
+            } catch (error: any) {
+              s.toast(`Ошибка очистки контекста: ${error?.message ?? error}`);
+            } finally {
+              setClearContextLoading(false);
+            }
+          }}
+        >
+          {clearContextLoading ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+          Очистить контекст
+        </button>
       </div>
     </Group>
 
