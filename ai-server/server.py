@@ -19,9 +19,11 @@ os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from compatibility import build_compatibility_report, get_hardware_report
+from audio_runtime import AUDIO_RUNTIME, AudioGenerateRequest
 
 MODEL_ID_DEFAULT = os.environ.get("VN_MODEL_ID", "qwen_image_2.1_turbo_int8_convrot")
 MODEL_PATH_DEFAULT = os.environ.get("VN_MODEL_PATH", "")
@@ -1561,3 +1563,67 @@ def llm_chat(req: LlmChatReq):
 @app.post("/llm/suggest")
 def llm_suggest(req: LlmSuggestReq):
     return {"job_id": enqueue("llm_suggest", req)}
+
+# ============================================================
+# HTTP API: isolated ACE-Step audio runtime
+# ============================================================
+
+@app.get("/audio/health")
+def audio_health():
+    return AUDIO_RUNTIME.health()
+
+
+@app.post("/audio/install")
+def audio_install():
+    try:
+        return {"job_id": AUDIO_RUNTIME.install()}
+    except RuntimeError as exc:
+        raise HTTPException(409, detail=str(exc))
+
+
+@app.post("/audio/start")
+def audio_start():
+    try:
+        return {"job_id": AUDIO_RUNTIME.start()}
+    except RuntimeError as exc:
+        raise HTTPException(409, detail=str(exc))
+
+
+@app.post("/audio/stop")
+def audio_stop():
+    return AUDIO_RUNTIME.stop()
+
+
+@app.get("/audio/jobs/{job_id}")
+def audio_job_status(job_id: str):
+    job = AUDIO_RUNTIME.get_job(job_id)
+    if not job:
+        raise HTTPException(404, "audio job not found")
+    return job
+
+
+@app.post("/audio/generate")
+def audio_generate(req: AudioGenerateRequest):
+    try:
+        return {"job_id": AUDIO_RUNTIME.generate(req)}
+    except RuntimeError as exc:
+        raise HTTPException(409, detail=str(exc))
+
+
+@app.get("/audio/jobs/{job_id}/file")
+def audio_job_file(job_id: str):
+    path = AUDIO_RUNTIME.get_job_file(job_id)
+    if path is None:
+        job = AUDIO_RUNTIME.get_job(job_id)
+        if not job:
+            raise HTTPException(404, "audio job not found")
+        if job.get("state") != "done":
+            raise HTTPException(409, "audio generation is not finished")
+        raise HTTPException(404, "generated audio file not found")
+    return FileResponse(str(path), media_type="audio/wav", filename=path.name)
+
+
+@app.on_event("shutdown")
+def shutdown_audio_runtime():
+    AUDIO_RUNTIME.shutdown()
+
