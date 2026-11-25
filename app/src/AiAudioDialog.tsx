@@ -252,7 +252,7 @@ export function AiAudioDialog({
               <input className="input" value={name} disabled={busy} onChange={e => setName(e.target.value)} />
             </div>
 
-            <button className="btn btn-primary w-full justify-center" disabled={busy || phase === 'generating'} onClick={generate}>
+            <button className="btn btn-primary w-full justify-center" disabled={busy} onClick={generate}>
               {phase === 'generating' ? <Loader2 size={14} className="animate-spin" /> : <Music2 size={14} />}
               {phase === 'generating' ? 'Генерация…' : result ? 'Сгенерировать ещё' : 'Сгенерировать'}
             </button>
