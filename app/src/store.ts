@@ -1307,7 +1307,7 @@ export const useStore = create<Store>((set, get) => {
             tracks: [...s.project.tracks, { id: trackId, name: name.trim() || (mode === 'effect' ? 'Звуковой эффект' : 'AI аудио'), freqs: [], color: '#9dff57', assetId, mode }],
           },
         }));
-        get().toast('AI-аудио добавлено в ассеты');
+        get().toast(mode === 'effect' ? 'Звуковой эффект добавлен в ассеты' : 'AI-аудио добавлено в ассеты');
         return trackId;
       } catch (error) {
         get().toast('Не удалось сохранить AI-аудио');
