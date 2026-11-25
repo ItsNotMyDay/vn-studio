@@ -1,4 +1,5 @@
 import { useStore, KIND_META, type NodeKind } from './store';
+import { renderProceduralEffect, SOUND_EFFECT_PRESETS, type ProceduralEffectOptions, type SoundPreset } from './audio';
 
 export interface AgentAction { tool: string; args?: Record<string, any>; }
 export interface AgentPlan { say?: string; actions?: AgentAction[]; }
@@ -42,6 +43,17 @@ set_director {patch} — настройки пульта (cps, fontSize, dim, bo
 preview_node {id} — статический предпросмотр сцены к этой ноде.
 play_from {id} — прогон с этой ноды с вопросами о развилках.
 index_chapter {} — переиндексировать главу для RAG.
+create_sound_effect {name?, preset?, settings?, waveform?, pattern?, frequency?, endFrequency?, durationMs?, volume?, attackMs?, releaseMs?, repeats?, gapMs?, noise?, addNode?, afterNodeId?, handle?, x?, y?} — создать WAV звукового эффекта через конструктор звуков и сохранить в ассеты.
+rename_track {id, name} — переименовать аудиоассет по его id из снимка.
+НАВЫК ЗВУКОВОГО ДИЗАЙНА (используй возможности панели «Создание звуков»):
+- Это локальный синтез коротких WAV, а не генерация аудио нейросетью и не запись реальных звуков.
+- Доступные стартовые шаблоны: click (мягкий щелчок), pop (короткий pop), notification (уведомление), success (успех), error (ошибка), alert (предупреждение), tone (длинный тон). Шаблон можно менять параметрами.
+- waveform: sine | triangle | square | sawtooth. pattern: single | double | ascending | descending | success | error.
+- Допустимые диапазоны настроек панели: frequency 80–2400 Гц; endFrequency 30–4000 Гц; durationMs 20–1500 мс; volume 0–100%; attackMs 0–200 мс; releaseMs 10–1500 мс; repeats 1–5; gapMs 0–800 мс; noise 0–100%.
+- Для короткого UI-клика выбирай click или pop, для положительного результата — success, для ошибки — error, для внимания — alert, для нейтрального сигнала — notification или tone. Подбирай осмысленное имя на русском.
+- Параметры можно передать прямо в args либо объектом settings. Сначала применяются настройки выбранного preset, затем переданные значения.
+- По умолчанию результат только сохраняется в ассеты как звуковой эффект. Если пользователь просит добавить звук на холст, укажи addNode: true. Чтобы сразу соединить его после существующей ноды, передай afterNodeId и при необходимости handle (например, opt_0/opt_1 у ноды выбора). Новая нода автоматически получит mode: "effect" и будет проигрывать звук один раз, не заменяя фоновую музыку.
+- Не выдавай ID аудио за ID ноды: инструмент вернёт оба ID, если создал ноду. Используй ID из снимка или результата, никогда не выдумывай их.
 Не оборачивай ответ в Markdown-код и не пиши текст вне JSON-объекта, если вызываешь инструменты.
 `;
 
@@ -131,7 +143,7 @@ export function canvasSnapshot(): string {
     scenes: s.project.scenes.map(x => ({ id: x.id, name: x.name })),
     characters: chars.map(c => ({ id: c.id, name: c.name, vars: c.vars.map(v => ({ key: v.key, type: v.type, value: v.value })) })),
     backgrounds: s.project.backgrounds.map(b => ({ id: b.id, name: b.name })),
-    tracks: s.project.tracks.map(t => ({ id: t.id, name: t.name })),
+    tracks: s.project.tracks.map(t => ({ id: t.id, name: t.name, mode: t.mode ?? 'music', hasFile: Boolean(t.assetId) })),
     sprites: s.project.sprites.map(x => ({ id: x.id, name: x.name })),
     nodes,
     nodes_total: sc?.nodes.length ?? 0,
@@ -158,6 +170,63 @@ export function describeAction(a: AgentAction): string {
   const args = a.args ?? {};
   const short = Object.entries(args).map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v).slice(0, 40) : String(v).slice(0, 40)}`).join(', ');
   return `${a.tool}(${short})`;
+}
+
+function buildSoundEffectOptions(args: Record<string, any>): {
+  preset: SoundPreset;
+  name: string;
+  settings: ProceduralEffectOptions;
+} {
+  const presetValue = String(args.preset ?? 'click');
+  if (!Object.prototype.hasOwnProperty.call(SOUND_EFFECT_PRESETS, presetValue)) {
+    throw new Error(`Неизвестный preset «${presetValue}». Доступны: ${Object.keys(SOUND_EFFECT_PRESETS).join(', ')}.`);
+  }
+  const preset = presetValue as SoundPreset;
+  const settings: ProceduralEffectOptions = { ...SOUND_EFFECT_PRESETS[preset].settings };
+  const overrides: Record<string, any> = isRecord(args.settings) ? { ...args.settings } : {};
+  const settingKeys = [
+    'waveform', 'pattern', 'frequency', 'endFrequency', 'durationMs', 'volume',
+    'attackMs', 'releaseMs', 'repeats', 'gapMs', 'noise',
+  ];
+  for (const key of settingKeys) {
+    if (key in args) overrides[key] = args[key];
+  }
+  const unknown = Object.keys(overrides).filter(key => !settingKeys.includes(key));
+  if (unknown.length) throw new Error(`Неизвестные параметры звука: ${unknown.join(', ')}.`);
+
+  const waveforms = ['sine', 'triangle', 'square', 'sawtooth'];
+  const patterns = ['single', 'double', 'ascending', 'descending', 'success', 'error'];
+  if ('waveform' in overrides) {
+    if (!waveforms.includes(String(overrides.waveform))) throw new Error(`waveform должен быть одним из: ${waveforms.join(', ')}.`);
+    settings.waveform = overrides.waveform;
+  }
+  if ('pattern' in overrides) {
+    if (!patterns.includes(String(overrides.pattern))) throw new Error(`pattern должен быть одним из: ${patterns.join(', ')}.`);
+    settings.pattern = overrides.pattern;
+  }
+
+  const ranges: Record<string, [number, number]> = {
+    frequency: [80, 2400],
+    endFrequency: [30, 4000],
+    durationMs: [20, 1500],
+    volume: [0, 100],
+    attackMs: [0, 200],
+    releaseMs: [10, 1500],
+    repeats: [1, 5],
+    gapMs: [0, 800],
+    noise: [0, 100],
+  };
+  for (const [key, [min, max]] of Object.entries(ranges)) {
+    if (!(key in overrides)) continue;
+    const value = Number(overrides[key]);
+    if (!Number.isFinite(value) || value < min || value > max) {
+      throw new Error(`${key} должно быть числом от ${min} до ${max}.`);
+    }
+    (settings as any)[key] = key === 'repeats' ? Math.round(value) : value;
+  }
+
+  const requestedName = typeof args.name === 'string' ? args.name.trim() : '';
+  return { preset, name: requestedName || SOUND_EFFECT_PRESETS[preset].name, settings };
 }
 
 const NODE_PATCH_FIELDS: Record<NodeKind, string[]> = {
@@ -355,7 +424,7 @@ function normalizeAgentPatch(node: any, args: Record<string, any>, project: any)
   return next;
 }
 
-export function executePlan(actions: AgentAction[]): ExecResult[] {
+export async function executePlan(actions: AgentAction[]): Promise<ExecResult[]> {
   const out: ExecResult[] = [];
   const st = () => useStore.getState();
   for (const a of actions.slice(0, 8)) {
@@ -416,6 +485,54 @@ export function executePlan(actions: AgentAction[]): ExecResult[] {
           out.push({ tool: a.tool, ok: true, detail: `выделена ${args.id}` });
           break;
         }
+        case 'create_sound_effect': {
+          const { name, settings } = buildSoundEffectOptions(args);
+          const shouldAddNode = args.addNode === true || (typeof args.afterNodeId === 'string' && args.afterNodeId.trim().length > 0);
+          const scene = shouldAddNode ? st().scene() : undefined;
+          if (shouldAddNode && !scene) throw new Error('Нет открытой сцены, куда можно добавить звуковую ноду.');
+          const afterNode = args.afterNodeId
+            ? scene?.nodes.find(node => node.id === String(args.afterNodeId))
+            : undefined;
+          if (args.afterNodeId && !afterNode) throw new Error('afterNodeId не найден в текущей сцене.');
+
+          const blob = await renderProceduralEffect(settings);
+          const trackId = await st().addTrackBlob(name, blob, 'effect', false);
+          let nodeInfo = '';
+          if (shouldAddNode) {
+            const rf = st().rf;
+            const center = rf
+              ? rf.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 })
+              : { x: 200, y: 200 };
+            const x = args.x == null ? (afterNode ? afterNode.position.x + 230 : center.x) : Number(args.x);
+            const y = args.y == null ? (afterNode ? afterNode.position.y : center.y) : Number(args.y);
+            if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error('Координаты x/y должны быть числами.');
+            const nodeId = st().addNode('music', { x, y }, { track: trackId, mode: 'effect' });
+            if (afterNode) {
+              st().onConnect({
+                source: afterNode.id,
+                sourceHandle: args.handle == null ? null : String(args.handle),
+                target: nodeId,
+                targetHandle: null,
+              } as any);
+            }
+            nodeInfo = `; добавлена нода ${nodeId}${afterNode ? ` после ${afterNode.id}` : ''}`;
+          }
+          out.push({
+            tool: a.tool,
+            ok: true,
+            detail: `создан звуковой эффект «${name}» (trackId=${trackId})${nodeInfo}`,
+          });
+          break;
+        }
+        case 'rename_track': {
+          const trackId = String(args.id ?? '');
+          const name = String(args.name ?? '').trim();
+          if (!trackId) throw new Error('Не передан id аудиоассета.');
+          if (!name) throw new Error('Имя аудио не может быть пустым.');
+          st().renameTrack(trackId, name, false);
+          out.push({ tool: a.tool, ok: true, detail: `аудиоассет ${trackId} переименован в «${name}»` });
+          break;
+        }
         case 'rename_scene': {
           const sc = st().scene();
           if (!sc) throw new Error('нет сцены');
@@ -439,8 +556,8 @@ export function executePlan(actions: AgentAction[]): ExecResult[] {
           break;
         }
         case 'index_chapter': {
-          st().indexCurrentChapter();
-          out.push({ tool: a.tool, ok: true, detail: 'индексация запущена' });
+          await st().indexCurrentChapter();
+          out.push({ tool: a.tool, ok: true, detail: 'индексация завершена' });
           break;
         }
         default:
