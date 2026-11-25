@@ -1886,6 +1886,10 @@ function AiModelsPanel() {
               {audioBusy && audioOperation === 'install' ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
               Установить движок
             </button>
+          ) : !audioH?.model_loaded && audioH?.running ? (
+            <button className="btn flex-1 justify-center" disabled>
+              <Loader2 size={12} className="animate-spin" /> {audioH.stage || 'Загрузка модели…'}
+            </button>
           ) : !audioH?.model_loaded ? (
             <button className="btn btn-primary flex-1 justify-center" disabled={audioBusy || !audioH} onClick={() => void runAudioOperation('start')}>
               {audioBusy && audioOperation === 'start' ? <Loader2 size={12} className="animate-spin" /> : <Server size={12} />}
