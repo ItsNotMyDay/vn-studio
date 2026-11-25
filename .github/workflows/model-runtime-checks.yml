@@ -16,10 +16,10 @@ jobs:
           python-version: "3.12"
       - name: Compile AI server modules
         working-directory: ai-server
-        run: python -m py_compile server.py compatibility.py
+        run: python -m py_compile server.py compatibility.py audio_runtime.py
       - name: Run compatibility analyzer tests
         working-directory: ai-server
-        run: python -m unittest -v test_compatibility.py
+        run: python -m unittest -v test_compatibility.py test_audio_runtime.py
 
   frontend:
     runs-on: ubuntu-latest
