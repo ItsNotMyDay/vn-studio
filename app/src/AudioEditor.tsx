@@ -362,7 +362,6 @@ export function AudioEditor({ blob, filename, onApply }: AudioEditorProps) {
   const pausePlayback = async () => {
     const active = playbackRef.current;
     if (!active || !playing) return;
-    active.offset = Math.min(trimEnd - trimStart, elapsedPlayback(active));
     if (active.timer !== null) {
       window.clearInterval(active.timer);
       active.timer = null;
@@ -370,10 +369,13 @@ export function AudioEditor({ blob, filename, onApply }: AudioEditorProps) {
     try {
       await active.context.suspend();
       if (playbackRef.current !== active) return;
+      // Read the clock after suspend completes so the resume point cannot drift.
+      active.offset = Math.min(trimEnd - trimStart, elapsedPlayback(active));
       setPlayhead(Math.min(trimEnd, trimStart + active.offset));
       setPlaying(false);
       setPaused(true);
     } catch (reason) {
+      if (playbackRef.current !== active) return;
       setError(reason instanceof Error ? reason.message : 'Не удалось поставить воспроизведение на паузу.');
     }
   };
@@ -713,15 +715,17 @@ export function AudioEditor({ blob, filename, onApply }: AudioEditorProps) {
                 );
               })}
               </div>
-              <div
-                aria-hidden="true"
-                className="absolute top-0 bottom-0 w-[2px] z-10 pointer-events-none"
-                style={{
-                  left: `calc(8px + (100% - 16px) * ${buffer.duration > 0 ? clamp(playhead / buffer.duration, 0, 1) : 0})`,
-                  background: '#ffffff',
-                  boxShadow: '0 0 7px 2px rgba(255,255,255,.65)',
-                }}
-              />
+              <div aria-hidden="true" className="absolute inset-y-0 left-2 right-2 z-10 pointer-events-none">
+                <div
+                  className="absolute top-0 bottom-0 w-[2px]"
+                  style={{
+                    left: `${(buffer.duration > 0 ? clamp(playhead / buffer.duration, 0, 1) : 0) * 100}%`,
+                    transform: 'translateX(-1px)',
+                    background: '#ffffff',
+                    boxShadow: '0 0 7px 2px rgba(255,255,255,.65)',
+                  }}
+                />
+              </div>
             </div>
             <div className="flex items-center justify-between text-[9px] text-mute tabular-nums">
               <span>{formatTime(0)}</span>
