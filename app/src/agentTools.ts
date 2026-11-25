@@ -495,9 +495,7 @@ export async function executePlan(actions: AgentAction[]): Promise<ExecResult[]>
             : undefined;
           if (args.afterNodeId && !afterNode) throw new Error('afterNodeId не найден в текущей сцене.');
 
-          const blob = await renderProceduralEffect(settings);
-          const trackId = await st().addTrackBlob(name, blob, 'effect', false);
-          let nodeInfo = '';
+          let nodePosition: { x: number; y: number } | null = null;
           if (shouldAddNode) {
             const rf = st().rf;
             const center = rf
@@ -506,7 +504,14 @@ export async function executePlan(actions: AgentAction[]): Promise<ExecResult[]>
             const x = args.x == null ? (afterNode ? afterNode.position.x + 230 : center.x) : Number(args.x);
             const y = args.y == null ? (afterNode ? afterNode.position.y : center.y) : Number(args.y);
             if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error('Координаты x/y должны быть числами.');
-            const nodeId = st().addNode('music', { x, y }, { track: trackId, mode: 'effect' });
+            nodePosition = { x, y };
+          }
+
+          const blob = await renderProceduralEffect(settings);
+          const trackId = await st().addTrackBlob(name, blob, 'effect', false);
+          let nodeInfo = '';
+          if (nodePosition) {
+            const nodeId = st().addNode('music', nodePosition, { track: trackId, mode: 'effect' });
             if (afterNode) {
               st().onConnect({
                 source: afterNode.id,
