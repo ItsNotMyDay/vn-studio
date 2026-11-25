@@ -60,7 +60,14 @@ def parse_generated_audio_path(task_result: Any) -> str:
             continue
         path = record.get("file") or record.get("path") or record.get("audio_path")
         if isinstance(path, str) and path.strip():
-            return path.strip()
+            candidate = path.strip()
+            parsed_url = urllib.parse.urlsplit(candidate)
+            if parsed_url.path.rstrip("/") in ("/v1/audio", "v1/audio"):
+                query_path = urllib.parse.parse_qs(parsed_url.query).get("path")
+                if not query_path or not query_path[0].strip():
+                    raise RuntimeError("ACE-Step вернул ссылку на аудио без параметра path")
+                return query_path[0]
+            return candidate
     raise RuntimeError("ACE-Step завершил задачу, но не вернул путь к аудиофайлу")
 
 
