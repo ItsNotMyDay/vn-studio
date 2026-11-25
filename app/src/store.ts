@@ -523,8 +523,8 @@ interface Store {
 
   onNodesChange: (chs: NodeChangeset<Node>) => void;
   onEdgesChange: (chs: EdgeChangeset<Edge>) => void;
-  onConnect: (c: Connection) => void;
-  addNode: (kind: NodeKind, pos: { x: number; y: number }, data?: any) => string;
+  onConnect: (c: Connection, commitBefore?: boolean) => void;
+  addNode: (kind: NodeKind, pos: { x: number; y: number }, data?: any, commitBefore?: boolean) => string;
   updateNodeData: (id: string, patch: any) => void;
   deleteSelected: () => void;
   deleteEdge: (id: string) => void;
@@ -1045,11 +1045,11 @@ export const useStore = create<Store>((set, get) => {
 
     onNodesChange: chs => mutateScene(sc => ({ ...sc, nodes: applyNodes(chs.toArray(), sc.nodes) })),
     onEdgesChange: chs => mutateScene(sc => ({ ...sc, edges: applyEdges(chs.toArray(), sc.edges) })),
-    onConnect: c => {
+    onConnect: (c, commitBefore = true) => {
       const sc = get().scene();
       if (!sc || !c.source || !c.target || c.source === c.target) return;
       const h = c.sourceHandle ?? '';
-      get().commit();
+      if (commitBefore) get().commit();
       audioEngine.audioEnsure?.();
       audioEngine.audioTick?.(980, 0.05, 0.07);
       mutateScene(s => ({
@@ -1060,8 +1060,8 @@ export const useStore = create<Store>((set, get) => {
         ),
       }));
     },
-    addNode: (kind, pos, data) => {
-      get().commit();
+    addNode: (kind, pos, data, commitBefore = true) => {
+      if (commitBefore) get().commit();
       audioEngine.audioEnsure?.();
       audioEngine.audioTick?.(760, 0.06, 0.08);
       const p = get().project;
