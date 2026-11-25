@@ -514,6 +514,17 @@ class AudioRuntime:
         with urllib.request.urlopen(req, timeout=timeout) as response:
             return json.loads(response.read().decode("utf-8"))
 
+    def _environment_python(self) -> Path:
+        if os.name == "nt":
+            python = self.repo_dir / ".venv" / "Scripts" / "python.exe"
+        else:
+            python = self.repo_dir / ".venv" / "bin" / "python"
+        if not python.is_file():
+            raise RuntimeError(
+                "Не найден Python в окружении ACE-Step. Повтори установку аудиодвижка."
+            )
+        return python
+
     def _api_server_command(self) -> list[str]:
         """Launch ACE-Step through its module, not the generated console-script wrapper."""
         python = self._environment_python()
