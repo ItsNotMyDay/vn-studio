@@ -410,27 +410,74 @@ class AudioRuntime:
     def install(self) -> str:
         return self._submit("install", "Подготовка установки ACE-Step", self._install)
 
-    def _install(self, job_id: str) -> dict[str, Any]:
-        if self._installed():
-            self._update_job(job_id, progress=0.98, stage="Движок уже установлен")
-            return {"installed": True, "already_installed": True}
-        if self.process_running():
-            raise RuntimeError("Сначала останови работающий аудиодвижок")
-        # Bootstrap uv before downloading the engine source so missing pip/uv
-        # is reported early and does not leave a partially prepared install.
-        uv = self._uv_command(job_id)
-        self._download_source(job_id)
+    def _sync_environment(
+        self,
+        job_id: str,
+        uv: list[str],
+        stage: str,
+        progress: float,
+    ) -> None:
+        """Install or repair all locked ACE-Step dependencies in its own venv."""
         env = os.environ.copy()
         env["UV_PROJECT_ENVIRONMENT"] = str(self.repo_dir / ".venv")
         env["UV_PYTHON_DOWNLOADS"] = "automatic"
         self._run_command(
-            [*uv, "sync", "--python", "3.11", "--no-dev"],
+            [
+                *uv,
+                "sync",
+                "--project",
+                str(self.repo_dir),
+                "--python",
+                "3.11",
+                "--no-dev",
+                "--locked",
+            ],
             self.repo_dir,
             env,
             job_id,
-            "Создание изолированной среды Python 3.11 и установка зависимостей",
-            0.34,
+            stage,
+            progress,
             timeout=4 * 60 * 60,
+        )
+
+        # A pre-existing .venv directory is not proof that dependencies were
+        # installed. Check the import that failed on affected Windows installs
+        # before trying to start the API process.
+        python = self._environment_python()
+        try:
+            probe = subprocess.run(
+                [str(python), "-c", "import loguru"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise RuntimeError(
+                "Не удалось проверить зависимости окружения ACE-Step после uv sync."
+            ) from exc
+        if probe.returncode != 0:
+            detail = (probe.stderr or probe.stdout or "").strip()[-1200:]
+            raise RuntimeError(
+                "uv sync завершился, но пакет loguru всё ещё недоступен в окружении ACE-Step. "
+                + detail
+            )
+
+    def _install(self, job_id: str) -> dict[str, Any]:
+        if self.process_running():
+            raise RuntimeError("Сначала останови работающий аудиодвижок")
+
+        # Reuse an existing checkout and venv. A previous interrupted install
+        # may have created .venv without installing all dependencies.
+        uv = self._uv_command(job_id)
+        if not (self.repo_dir / "pyproject.toml").is_file():
+            self._download_source(job_id)
+
+        self._sync_environment(
+            job_id,
+            uv,
+            "Создание или восстановление окружения Python 3.11 и установка зависимостей",
+            0.34,
         )
         if not self._installed():
             raise RuntimeError("uv завершил установку, но виртуальная среда ACE-Step не найдена")
@@ -467,13 +514,7 @@ class AudioRuntime:
         with urllib.request.urlopen(req, timeout=timeout) as response:
             return json.loads(response.read().decode("utf-8"))
 
-    def _api_server_command(self) -> list[str]:
-        """Launch ACE-Step through its module, not the generated console-script wrapper.
-
-        On Windows the console-script shim can be missing even after uv
-        creates the project environment. The module entry point is part of the
-        checked-out source tree and runs with the exact venv interpreter.
-        """
+    def _environment_python(self) -> Path:
         if os.name == "nt":
             python = self.repo_dir / ".venv" / "Scripts" / "python.exe"
         else:
@@ -482,6 +523,11 @@ class AudioRuntime:
             raise RuntimeError(
                 "Не найден Python в окружении ACE-Step. Повтори установку аудиодвижка."
             )
+        return python
+
+    def _api_server_command(self) -> list[str]:
+        """Launch ACE-Step through its module, not the generated console-script wrapper."""
+        python = self._environment_python()
         return [
             str(python),
             "-m",
@@ -504,6 +550,17 @@ class AudioRuntime:
             except Exception:
                 pass
             self.stop_service()
+
+        # Always reconcile the existing venv with uv.lock before launch.
+        # uv sync is incremental, but repairs missing packages left by an
+        # interrupted or previously incomplete installation.
+        uv = self._uv_command(job_id)
+        self._sync_environment(
+            job_id,
+            uv,
+            "Проверка и восстановление зависимостей ACE-Step",
+            0.12,
+        )
 
         env = os.environ.copy()
         env["ACESTEP_API_HOST"] = "127.0.0.1"
