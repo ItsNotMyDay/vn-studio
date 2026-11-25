@@ -527,7 +527,7 @@ export function Sidebar() {
       </div>
 
       <AiBackgroundDialog open={bgAi} onClose={() => setBgAi(false)} />
-      <SoundEffectBuilder open={soundBuilderOpen} onClose={() => setSoundBuilderOpen(false)} />
+      {soundBuilderOpen && <SoundEffectBuilder open={soundBuilderOpen} onClose={() => setSoundBuilderOpen(false)} />}
     </div>
   );
 }
