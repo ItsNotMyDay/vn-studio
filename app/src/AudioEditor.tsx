@@ -437,16 +437,16 @@ export function AudioEditor({ blob, filename, onApply }: AudioEditorProps) {
 
   const updateStart = (value: number) => {
     const next = clamp(value, 0, Math.max(0, trimEnd - MIN_SELECTION_SECONDS));
+    if (playing) stopPlayback();
     setTrimStart(next);
     setPlayhead(next);
-    if (playing) stopPlayback();
   };
 
   const updateEnd = (value: number) => {
     const next = clamp(value, Math.min(buffer?.duration ?? value, trimStart + MIN_SELECTION_SECONDS), buffer?.duration ?? value);
+    if (playing) stopPlayback();
     setTrimEnd(next);
     setPlayhead(Math.min(playhead, next));
-    if (playing) stopPlayback();
   };
 
   const renderSlider = (
