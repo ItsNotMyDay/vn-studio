@@ -183,10 +183,16 @@ class AudioRuntime:
             return (self.repo_dir / ".venv" / "Scripts" / "python.exe").is_file()
         return (self.repo_dir / ".venv" / "bin" / "python").is_file()
 
-    def _uv_command(self) -> str:
+    def _uv_command(self, job_id: str | None = None) -> list[str]:
+        """Find uv or bootstrap it into the Python environment running this server.
+
+        The PyPI package exposes a module entry point, so invoking it through
+        sys.executable avoids PATH differences between a console and Tauri.
+        """
         found = shutil.which("uv")
         if found:
-            return found
+            return [found]
+
         scripts = Path(sys.executable).resolve().parent
         candidates = (
             scripts / "uv.exe",
@@ -195,11 +201,115 @@ class AudioRuntime:
         )
         for candidate in candidates:
             if candidate.is_file():
-                return str(candidate)
-        raise RuntimeError(
-            "Не найден uv. Установи зависимости ai-server из актуального requirements.txt "
-            "(в нём должен быть uv)."
-        )
+                return [str(candidate)]
+
+        module_command = [sys.executable, "-m", "uv"]
+        try:
+            probe = subprocess.run(
+                [*module_command, "--version"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            probe = None
+        if probe is not None and probe.returncode == 0:
+            return module_command
+
+        if job_id:
+            self._update_job(
+                job_id,
+                progress=0.02,
+                stage="Установка утилиты uv в окружение AI-сервера",
+            )
+
+        # A user may have installed the AI server without re-installing the
+        # newly-added requirements.txt entry. Bootstrap uv with the same
+        # interpreter that is currently running server.py.
+        pip_command = [sys.executable, "-m", "pip"]
+        try:
+            pip_probe = subprocess.run(
+                [*pip_command, "--version"],
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise RuntimeError(
+                "Не удалось запустить pip через Python AI-сервера. "
+                "Обнови ai-server и установи его requirements.txt."
+            ) from exc
+
+        if pip_probe.returncode != 0:
+            try:
+                ensurepip = subprocess.run(
+                    [sys.executable, "-m", "ensurepip", "--upgrade"],
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                    check=False,
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                raise RuntimeError(
+                    "В Python AI-сервера отсутствуют pip и ensurepip; "
+                    "не удалось автоматически подготовить установщик uv."
+                ) from exc
+            if ensurepip.returncode != 0:
+                detail = (ensurepip.stderr or ensurepip.stdout or "").strip()[-1200:]
+                raise RuntimeError(
+                    "Не удалось восстановить pip для установки uv. " + detail
+                )
+
+        try:
+            installed = subprocess.run(
+                [
+                    *pip_command,
+                    "install",
+                    "--disable-pip-version-check",
+                    "uv>=0.7.0",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5 * 60,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise RuntimeError(
+                "Не удалось автоматически установить uv через pip. "
+                "Проверь доступ к PyPI и повтори установку."
+            ) from exc
+
+        if installed.returncode != 0:
+            detail = (installed.stderr or installed.stdout or "").strip()[-1600:]
+            raise RuntimeError(
+                "Не удалось автоматически установить uv через Python AI-сервера. "
+                "Проверь доступ к PyPI. " + detail
+            )
+
+        try:
+            verified = subprocess.run(
+                [*module_command, "--version"],
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise RuntimeError(
+                "uv установился, но Python AI-сервера не может его запустить."
+            ) from exc
+
+        if verified.returncode != 0:
+            detail = (verified.stderr or verified.stdout or "").strip()[-1200:]
+            raise RuntimeError(
+                "pip сообщил об успешной установке uv, но модуль uv недоступен. "
+                + detail
+            )
+
+        self._append_log((verified.stdout or "uv установлен").strip())
+        return module_command
 
     def _run_command(
         self,
@@ -306,13 +416,15 @@ class AudioRuntime:
             return {"installed": True, "already_installed": True}
         if self.process_running():
             raise RuntimeError("Сначала останови работающий аудиодвижок")
+        # Bootstrap uv before downloading the engine source so missing pip/uv
+        # is reported early and does not leave a partially prepared install.
+        uv = self._uv_command(job_id)
         self._download_source(job_id)
-        uv = self._uv_command()
         env = os.environ.copy()
         env["UV_PROJECT_ENVIRONMENT"] = str(self.repo_dir / ".venv")
         env["UV_PYTHON_DOWNLOADS"] = "automatic"
         self._run_command(
-            [uv, "sync", "--python", "3.11", "--no-dev"],
+            [*uv, "sync", "--python", "3.11", "--no-dev"],
             self.repo_dir,
             env,
             job_id,
@@ -368,7 +480,7 @@ class AudioRuntime:
                 pass
             self.stop_service()
 
-        uv = self._uv_command()
+        uv = self._uv_command(job_id)
         env = os.environ.copy()
         env["ACESTEP_API_HOST"] = "127.0.0.1"
         env["ACESTEP_API_PORT"] = str(self.port)
@@ -378,7 +490,7 @@ class AudioRuntime:
         env["ACESTEP_LLM_BACKEND"] = "pt"
         env.pop("ACESTEP_API_KEY", None)
         command = [
-            uv, "run", "--project", str(self.repo_dir), "--no-sync",
+            *uv, "run", "--project", str(self.repo_dir), "--no-sync",
             "acestep-api", "--host", "127.0.0.1", "--port", str(self.port),
         ]
         self._append_log("Запуск ACE-Step 1.5 API")
