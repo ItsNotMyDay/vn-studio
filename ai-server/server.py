@@ -1183,6 +1183,9 @@ def _download_hf_model(req: ModelDownloadReq, job: dict):
 
         def __init__(self, *args, **kwargs):
             self._vn_track_bytes = str(kwargs.get("unit", "")).lower() in ("b", "byte", "bytes")
+            # Hugging Face adds a diagnostic "name" kwarg that tqdm itself
+            # does not accept. The name is only used internally by the Hub.
+            kwargs.pop("name", None)
             # The server is not attached to a TTY. Keep tqdm's counters active,
             # but send its output to an in-memory stream instead of stderr.
             kwargs["disable"] = False
