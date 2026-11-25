@@ -1111,11 +1111,104 @@ def _download_hf_model(req: ModelDownloadReq, job: dict):
     target = os.path.abspath(os.path.join(model_root, folder))
     if os.path.commonpath([os.path.abspath(model_root), target]) != os.path.abspath(model_root):
         raise ValueError('Недопустимый путь для сохранения модели')
-    job['stage'] = 'Подготовка загрузки с Hugging Face…'
+
+    job['stage'] = 'Получение списка файлов модели…'
     job['progress'] = 0.02
-    from huggingface_hub import snapshot_download
-    job['stage'] = 'Скачивание ' + repo_id + ' (возможна большая загрузка)…'
-    snapshot_download(repo_id=repo_id, local_dir=target)
+    from huggingface_hub import HfApi, snapshot_download
+    from tqdm.auto import tqdm
+
+    # Get a stable denominator before downloading. snapshot_download discovers
+    # files concurrently, so using its growing total directly can make the
+    # displayed percentage jump or move backwards while more files are queued.
+    total_bytes = 0
+    existing_bytes = 0
+    try:
+        repo_info = HfApi().model_info(repo_id=repo_id, files_metadata=True)
+        files = list(getattr(repo_info, 'siblings', None) or [])
+        total_bytes = sum(int(getattr(item, 'size', 0) or 0) for item in files)
+        for item in files:
+            size = int(getattr(item, 'size', 0) or 0)
+            relative_path = str(getattr(item, 'rfilename', '') or '')
+            if size <= 0 or not relative_path:
+                continue
+            local_file = os.path.join(target, *relative_path.split('/'))
+            try:
+                if os.path.isfile(local_file) and os.path.getsize(local_file) >= size:
+                    existing_bytes += size
+            except OSError:
+                pass
+    except Exception:
+        # snapshot_download remains the source of truth for access/download
+        # errors. If metadata is unavailable, its own tqdm total is our fallback.
+        total_bytes = 0
+        existing_bytes = 0
+
+    progress_lock = threading.Lock()
+    progress_state = {"fraction": 0.0}
+
+    def human_size(value: int) -> str:
+        amount = float(max(0, value))
+        for unit in ("Б", "КиБ", "МиБ", "ГиБ", "ТиБ"):
+            if amount < 1024 or unit == "ТиБ":
+                return f"{amount:.1f} {unit}" if unit != "Б" else f"{amount:.0f} {unit}"
+            amount /= 1024
+        return f"{amount:.1f} ТиБ"
+
+    def publish_progress(downloaded_bytes: int, bar_total: int = 0):
+        denominator = total_bytes or int(bar_total or 0)
+        downloaded = max(0, int(downloaded_bytes or 0))
+        already_present = existing_bytes if total_bytes else 0
+        current = min(denominator, already_present + downloaded) if denominator else downloaded
+        fraction = min(1.0, current / denominator) if denominator > 0 else 0.0
+        with progress_lock:
+            # A multi-file download discovers file sizes while workers start.
+            # Keep the UI monotonic if the Hub has not supplied a full total.
+            fraction = max(progress_state["fraction"], fraction)
+            progress_state["fraction"] = fraction
+            next_progress = min(0.98, 0.02 + fraction * 0.96)
+            job["progress"] = max(float(job.get("progress", 0.02)), next_progress)
+            if denominator > 0:
+                job["stage"] = (
+                    f"Скачивание {repo_id}: "
+                    f"{human_size(current)} / {human_size(denominator)}"
+                )
+            else:
+                job["stage"] = f"Скачивание {repo_id}: получено {human_size(downloaded)}"
+
+    if total_bytes > 0:
+        publish_progress(0, total_bytes)
+
+    class DownloadProgressTqdm(tqdm):
+        """Route Hugging Face byte progress to the background job, without console bars."""
+
+        def __init__(self, *args, **kwargs):
+            self._vn_track_bytes = str(kwargs.get("unit", "")).lower() in ("b", "byte", "bytes")
+            # The server is not attached to a TTY. Keep tqdm's counters active,
+            # but send its output to an in-memory stream instead of stderr.
+            kwargs["disable"] = False
+            kwargs["leave"] = False
+            kwargs["file"] = io.StringIO()
+            super().__init__(*args, **kwargs)
+            if self._vn_track_bytes:
+                publish_progress(self.n, self.total or 0)
+
+        def update(self, n=1):
+            result = super().update(n)
+            if self._vn_track_bytes:
+                publish_progress(self.n, self.total or 0)
+            return result
+
+        def update_transfer(self, n=1):
+            # Some Hugging Face/Xet versions expose network-transfer bytes
+            # through this optional tqdm hook.
+            return self.update(n)
+
+    job['stage'] = 'Подготовка загрузки с Hugging Face…'
+    snapshot_download(
+        repo_id=repo_id,
+        local_dir=target,
+        tqdm_class=DownloadProgressTqdm,
+    )
     if req.kind == 'llm' and not os.path.isfile(os.path.join(target, 'config.json')):
         raise RuntimeError('В репозитории нет config.json. Для локальной LLM нужна модель формата Transformers; GGUF пока не поддерживается.')
     if req.kind == 'image' and not os.path.isfile(os.path.join(target, 'model_index.json')):
