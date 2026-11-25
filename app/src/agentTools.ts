@@ -511,14 +511,14 @@ export async function executePlan(actions: AgentAction[]): Promise<ExecResult[]>
           const trackId = await st().addTrackBlob(name, blob, 'effect', false);
           let nodeInfo = '';
           if (nodePosition) {
-            const nodeId = st().addNode('music', nodePosition, { track: trackId, mode: 'effect' });
+            const nodeId = st().addNode('music', nodePosition, { track: trackId, mode: 'effect' }, false);
             if (afterNode) {
               st().onConnect({
                 source: afterNode.id,
                 sourceHandle: args.handle == null ? null : String(args.handle),
                 target: nodeId,
                 targetHandle: null,
-              } as any);
+              } as any, false);
             }
             nodeInfo = `; добавлена нода ${nodeId}${afterNode ? ` после ${afterNode.id}` : ''}`;
           }
