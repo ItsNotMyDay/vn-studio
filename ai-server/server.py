@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from compatibility import build_compatibility_report, get_hardware_report
-from audio_runtime import AUDIO_RUNTIME, AudioGenerateRequest
+from audio_runtime import AUDIO_RUNTIME
 
 MODEL_ID_DEFAULT = os.environ.get("VN_MODEL_ID", "qwen_image_2.1_turbo_int8_convrot")
 MODEL_PATH_DEFAULT = os.environ.get("VN_MODEL_PATH", "")
@@ -269,6 +269,29 @@ class OpenAiChatReq(OpenAiConnectionReq):
     messages: list
     max_tokens: int = 512
     temperature: float = 0.7
+
+class AudioGenerateReq(BaseModel):
+    prompt: str
+    lyrics: str = ""
+    duration: float = 30
+    bpm: Optional[int] = None
+    instrumental: bool = True
+    mode: str = "music"
+
+    @classmethod
+    def model_validate(cls, value):
+        request = super().model_validate(value)
+        if not 3 <= len(request.prompt.strip()) <= 2000:
+            raise ValueError("prompt должен содержать от 3 до 2000 символов")
+        if len(request.lyrics) > 12000:
+            raise ValueError("lyrics слишком длинный")
+        if not 10 <= request.duration <= 600:
+            raise ValueError("duration должен быть от 10 до 600 секунд")
+        if request.bpm is not None and not 30 <= request.bpm <= 300:
+            raise ValueError("bpm должен быть от 30 до 300")
+        if request.mode not in ("music", "effect"):
+            raise ValueError("mode должен быть music или effect")
+        return request
 
 class ModelDownloadReq(BaseModel):
     repo_id: str
@@ -1603,7 +1626,7 @@ def audio_job_status(job_id: str):
 
 
 @app.post("/audio/generate")
-def audio_generate(req: AudioGenerateRequest):
+def audio_generate(req: AudioGenerateReq):
     try:
         return {"job_id": AUDIO_RUNTIME.generate(req)}
     except RuntimeError as exc:
