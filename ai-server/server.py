@@ -20,7 +20,7 @@ os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from compatibility import build_compatibility_report, get_hardware_report
 from audio_runtime import AUDIO_RUNTIME
@@ -271,27 +271,12 @@ class OpenAiChatReq(OpenAiConnectionReq):
     temperature: float = 0.7
 
 class AudioGenerateReq(BaseModel):
-    prompt: str
-    lyrics: str = ""
-    duration: float = 30
-    bpm: Optional[int] = None
+    prompt: str = Field(min_length=3, max_length=2000)
+    lyrics: str = Field(default="", max_length=12000)
+    duration: float = Field(default=30, ge=10, le=600)
+    bpm: Optional[int] = Field(default=None, ge=30, le=300)
     instrumental: bool = True
-    mode: str = "music"
-
-    @classmethod
-    def model_validate(cls, value):
-        request = super().model_validate(value)
-        if not 3 <= len(request.prompt.strip()) <= 2000:
-            raise ValueError("prompt должен содержать от 3 до 2000 символов")
-        if len(request.lyrics) > 12000:
-            raise ValueError("lyrics слишком длинный")
-        if not 10 <= request.duration <= 600:
-            raise ValueError("duration должен быть от 10 до 600 секунд")
-        if request.bpm is not None and not 30 <= request.bpm <= 300:
-            raise ValueError("bpm должен быть от 30 до 300")
-        if request.mode not in ("music", "effect"):
-            raise ValueError("mode должен быть music или effect")
-        return request
+    mode: Literal["music", "effect"] = "music"
 
 class ModelDownloadReq(BaseModel):
     repo_id: str
