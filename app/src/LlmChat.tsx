@@ -252,7 +252,7 @@ export function LlmChat() {
     setLoading(true);
     try {
       useStore.getState().commit();
-      const results = executePlan(plan.actions ?? []);
+      const results = await executePlan(plan.actions ?? []);
       setLastLog(results);
       setCanUndoBatch(true);
       push('Выполнено:\n' + results.map(r => `${r.ok ? '✓' : '✗'} ${r.detail}`).join('\n'));
