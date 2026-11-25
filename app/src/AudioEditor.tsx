@@ -344,8 +344,8 @@ export function AudioEditor({ blob, filename, onApply, onRename }: AudioEditorPr
     setAudioName(filename);
   }, [filename]);
 
-  const saveAudioName = () => {
-    const nextName = audioName.trim();
+  const saveAudioName = (value: string = audioName) => {
+    const nextName = value.trim();
     if (!nextName) {
       setAudioName(filename);
       return;
@@ -771,7 +771,7 @@ export function AudioEditor({ blob, filename, onApply, onRename }: AudioEditorPr
             value={audioName}
             maxLength={120}
             onChange={event => setAudioName(event.target.value)}
-            onBlur={saveAudioName}
+            onBlur={event => saveAudioName(event.currentTarget.value)}
             onKeyDown={event => {
               if (event.key === 'Enter') {
                 event.preventDefault();
