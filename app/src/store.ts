@@ -545,6 +545,7 @@ interface Store {
 
   uploadBackground: (file: File) => Promise<void>;
   uploadTrack: (file: File) => Promise<void>;
+  addTrackBlob: (name: string, blob: Blob) => Promise<string>;
   uploadSprite: (charId: string, expression: string, file: File) => Promise<void>;
   applySpriteBlob: (charId: string, expression: string, blob: Blob, source: 'ai' | 'procedural' | 'upload', meta?: { prompt?: string; seed?: number; model?: string }) => Promise<void>;
   deleteBackground: (id: string) => void;
@@ -1293,6 +1294,25 @@ export const useStore = create<Store>((set, get) => {
         set(s => ({ project: { ...s.project, tracks: [...s.project.tracks, { id: uid('tr'), name: file.name.replace(/\.[^.]+$/, ''), freqs: [], color: '#9dff57', assetId }] } }));
         get().toast(`Трек загружен: ${file.name}`);
       } catch { get().toast('Не удалось сохранить файл'); }
+    },
+    addTrackBlob: async (name, blob) => {
+      const assetId = `tr_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+      try {
+        await putBlob(assetId, blob);
+        const trackId = uid('tr');
+        get().commit();
+        set(s => ({
+          project: {
+            ...s.project,
+            tracks: [...s.project.tracks, { id: trackId, name: name.trim() || 'AI аудио', freqs: [], color: '#9dff57', assetId }],
+          },
+        }));
+        get().toast('AI-аудио добавлено в ассеты');
+        return trackId;
+      } catch (error) {
+        get().toast('Не удалось сохранить AI-аудио');
+        throw error;
+      }
     },
     uploadSprite: async (charId, expression, file) => {
       if (!file.type.startsWith('image/')) { get().toast('Нужен файл изображения'); return; }
