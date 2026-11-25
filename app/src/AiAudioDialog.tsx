@@ -273,7 +273,7 @@ export function AiAudioDialog({
               filename={result.filename}
               onApply={blob => {
                 const url = URL.createObjectURL(blob);
-                setResult(current => current ? { ...current, blob, url, filename: current.filename.replace(/\\.[^.]+$/, '.wav') } : current);
+                setResult(current => current ? { ...current, blob, url, filename: current.filename.replace(/\.[^.]+$/, '.wav') } : current);
                 s.toast('Обработка аудио применена');
               }}
             />
