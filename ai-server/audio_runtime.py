@@ -603,7 +603,7 @@ class AudioRuntime:
             return 0.84, "VAE: декодирование аудио на CPU (не хватает свободной VRAM)"
 
         if "[tiled_decode]" in lower:
-            chunk_match = re.search(r"chunk_size\\s*=\\s*(\\d+)", message, re.IGNORECASE)
+            chunk_match = re.search(r"chunk_size\s*=\s*(\d+)", message, re.IGNORECASE)
             chunk_info = f", блок {chunk_match.group(1)}" if chunk_match else ""
             if "reduced overlap" in lower:
                 return 0.82, f"VAE: декодирование аудио блоками{chunk_info} (настройка overlap)"
