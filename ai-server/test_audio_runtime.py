@@ -212,6 +212,78 @@ class AudioRuntimeTests(unittest.TestCase):
             finally:
                 runtime.shutdown()
 
+    def test_http_access_logs_are_filtered_but_model_warnings_are_kept(self):
+        with tempfile.TemporaryDirectory() as temp:
+            runtime = AudioRuntime(base_dir=temp, port=18766)
+            try:
+                runtime._append_log('INFO:     127.0.0.1:56036 - "GET /health HTTP/1.1" 200 OK')
+                runtime._append_log("14:31:49 | WARNING | [tiled_decode] Reduced overlap")
+                with runtime._lock:
+                    self.assertEqual(runtime._log_tail, [
+                        "14:31:49 | WARNING | [tiled_decode] Reduced overlap"
+                    ])
+            finally:
+                runtime.shutdown()
+
+    @patch.object(AudioRuntime, "_detect_gpu_memory_gb", return_value=6.0)
+    def test_low_vram_enables_dit_cpu_offload(self, _detect):
+        with tempfile.TemporaryDirectory() as temp:
+            runtime = AudioRuntime(base_dir=temp, port=18766)
+            try:
+                env = {}
+                runtime._apply_low_vram_offload_defaults(env)
+                self.assertEqual(env["ACESTEP_OFFLOAD_DIT_TO_CPU"], "true")
+            finally:
+                runtime.shutdown()
+
+    @patch.object(AudioRuntime, "_detect_gpu_memory_gb", return_value=12.0)
+    def test_12gb_gpu_uses_low_vram_offload_profile(self, _detect):
+        with tempfile.TemporaryDirectory() as temp:
+            runtime = AudioRuntime(base_dir=temp, port=18766)
+            try:
+                env = {}
+                runtime._apply_low_vram_offload_defaults(env)
+                self.assertEqual(env["ACESTEP_OFFLOAD_DIT_TO_CPU"], "true")
+            finally:
+                runtime.shutdown()
+
+    @patch.object(AudioRuntime, "_detect_gpu_memory_gb", return_value=16.0)
+    def test_high_vram_does_not_force_dit_cpu_offload(self, _detect):
+        with tempfile.TemporaryDirectory() as temp:
+            runtime = AudioRuntime(base_dir=temp, port=18766)
+            try:
+                env = {}
+                runtime._apply_low_vram_offload_defaults(env)
+                self.assertNotIn("ACESTEP_OFFLOAD_DIT_TO_CPU", env)
+            finally:
+                runtime.shutdown()
+
+    @patch.object(AudioRuntime, "_detect_gpu_memory_gb", return_value=6.0)
+    def test_explicit_dit_cpu_offload_setting_is_preserved(self, _detect):
+        with tempfile.TemporaryDirectory() as temp:
+            runtime = AudioRuntime(base_dir=temp, port=18766)
+            try:
+                env = {"ACESTEP_OFFLOAD_DIT_TO_CPU": "false"}
+                runtime._apply_low_vram_offload_defaults(env)
+                self.assertEqual(env["ACESTEP_OFFLOAD_DIT_TO_CPU"], "false")
+            finally:
+                runtime.shutdown()
+
+    def test_generation_progress_identifies_vae_decode(self):
+        progress, stage = AudioRuntime._generation_progress(
+            "14:31:49 | WARNING | [tiled_decode] Reduced overlap from 64 to 32 for chunk_size=128"
+        )
+        self.assertEqual(progress, 0.82)
+        self.assertIn("VAE", stage)
+        self.assertIn("128", stage)
+
+    def test_generation_progress_identifies_cpu_vae_decode(self):
+        progress, stage = AudioRuntime._generation_progress(
+            "[_decode_on_cpu] Moving VAE to CPU for decode"
+        )
+        self.assertEqual(progress, 0.84)
+        self.assertIn("CPU", stage)
+
     def test_installed_detection_requires_project_and_venv_python(self):
         with tempfile.TemporaryDirectory() as temp:
             runtime = AudioRuntime(base_dir=temp, port=18766)
