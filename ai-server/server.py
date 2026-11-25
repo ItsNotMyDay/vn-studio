@@ -141,7 +141,8 @@ def embeddings_load(req: Optional[dict] = None):
 
 @app.get("/embeddings/health")
 def embeddings_health():
-    return {"loaded": EMBED_STATE["loaded"], "indexes": list_indexes(), "error": EMBED_STATE["error"]}
+    with EMBED_LOCK:
+        return {"loaded": EMBED_STATE["loaded"], "indexes": list_indexes(), "error": EMBED_STATE["error"]}
 
 @app.post("/embeddings/unload")
 def embeddings_unload():
@@ -153,11 +154,13 @@ def embeddings_unload():
 
 @app.post("/embeddings/index")
 def embeddings_index(req: IndexReq):
-    texts = [c["text"] for c in req.chunks]
-    vecs = embed_texts(texts)
-    chunks = [{"text": c["text"], "meta": c.get("meta", {}), "vec": v} for c, v in zip(req.chunks, vecs)]
-    save_index(req.chapter_id, chunks)
-    return {"ok": True, "count": len(chunks)}
+    # Keep indexing atomic with respect to the clear operation.
+    with EMBED_LOCK:
+        texts = [c["text"] for c in req.chunks]
+        vecs = embed_texts(texts)
+        chunks = [{"text": c["text"], "meta": c.get("meta", {}), "vec": v} for c, v in zip(req.chunks, vecs)]
+        save_index(req.chapter_id, chunks)
+        return {"ok": True, "count": len(chunks)}
 
 @app.post("/embeddings/clear")
 def embeddings_clear():
@@ -178,17 +181,18 @@ def embeddings_clear():
 
 @app.post("/embeddings/search")
 def embeddings_search(req: SearchReq):
-    q_vec = embed_texts([req.query])[0]
-    results = []
-    for cid in list_indexes():
-        if cid == req.exclude_chapter:
-            continue
-        chunks = load_index(cid)
-        for ch in chunks:
-            score = cosine_sim(q_vec, ch["vec"])
-            results.append({"chapter_id": cid, "text": ch["text"], "meta": ch.get("meta", {}), "score": score})
-    results.sort(key=lambda x: x["score"], reverse=True)
-    return {"results": results[:req.top_k]}
+    with EMBED_LOCK:
+        q_vec = embed_texts([req.query])[0]
+        results = []
+        for cid in list_indexes():
+            if cid == req.exclude_chapter:
+                continue
+            chunks = load_index(cid)
+            for ch in chunks:
+                score = cosine_sim(q_vec, ch["vec"])
+                results.append({"chapter_id": cid, "text": ch["text"], "meta": ch.get("meta", {}), "score": score})
+        results.sort(key=lambda x: x["score"], reverse=True)
+        return {"results": results[:req.top_k]}
 
 def _llm_load_with_progress(job):
     import contextlib
