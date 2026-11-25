@@ -3,6 +3,7 @@ import {
   AudioLines,
   Check,
   Loader2,
+  Pause,
   Play,
   RotateCcw,
   SlidersHorizontal,
@@ -16,10 +17,24 @@ interface AudioEditorProps {
   onApply: (blob: Blob) => void;
 }
 
+interface PlaybackNodes {
+  low: BiquadFilterNode;
+  mid: BiquadFilterNode;
+  high: BiquadFilterNode;
+  panner: StereoPannerNode;
+  dryGain: GainNode;
+  wetGain: GainNode;
+  masterGain: GainNode;
+  envelopeGain: GainNode;
+}
+
 interface PlaybackHandle {
   context: AudioContext;
   source: AudioBufferSourceNode;
-  timer: number;
+  nodes: PlaybackNodes;
+  timer: number | null;
+  startedAt: number;
+  offset: number;
 }
 
 const MIN_SELECTION_SECONDS = 0.25;
@@ -99,6 +114,106 @@ function connectEffects(
   panner.pan.value = settings.pan / 100;
   previous.connect(panner);
   return panner;
+}
+
+function createPlaybackGraph(
+  context: AudioContext,
+  source: AudioBufferSourceNode,
+  settings: {
+    bass: number;
+    mid: number;
+    treble: number;
+    pan: number;
+    compression: boolean;
+    volume: number;
+    normalizeGain: number;
+  },
+): PlaybackNodes {
+  const low = context.createBiquadFilter();
+  low.type = 'lowshelf';
+  low.frequency.value = 120;
+  low.gain.value = settings.bass;
+
+  const mid = context.createBiquadFilter();
+  mid.type = 'peaking';
+  mid.frequency.value = 1000;
+  mid.Q.value = 0.8;
+  mid.gain.value = settings.mid;
+
+  const high = context.createBiquadFilter();
+  high.type = 'highshelf';
+  high.frequency.value = 8000;
+  high.gain.value = settings.treble;
+
+  const dryGain = context.createGain();
+  dryGain.gain.value = settings.compression ? 0 : 1;
+  const compressor = context.createDynamicsCompressor();
+  compressor.threshold.value = -20;
+  compressor.knee.value = 14;
+  compressor.ratio.value = 3;
+  compressor.attack.value = 0.004;
+  compressor.release.value = 0.22;
+  const wetGain = context.createGain();
+  wetGain.gain.value = settings.compression ? 1 : 0;
+
+  const panner = context.createStereoPanner();
+  panner.pan.value = settings.pan / 100;
+  const masterGain = context.createGain();
+  masterGain.gain.value = (settings.volume / 100) * settings.normalizeGain;
+  const envelopeGain = context.createGain();
+  envelopeGain.gain.value = 1;
+
+  source.connect(low);
+  low.connect(mid);
+  mid.connect(high);
+  high.connect(dryGain);
+  high.connect(compressor);
+  compressor.connect(wetGain);
+  dryGain.connect(panner);
+  wetGain.connect(panner);
+  panner.connect(masterGain);
+  masterGain.connect(envelopeGain);
+  envelopeGain.connect(context.destination);
+
+  return { low, mid, high, panner, dryGain, wetGain, masterGain, envelopeGain };
+}
+
+function elapsedPlayback(active: PlaybackHandle): number {
+  return Math.max(0, active.offset + (active.context.currentTime - active.startedAt));
+}
+
+function applyPlaybackFade(
+  active: PlaybackHandle,
+  elapsed: number,
+  duration: number,
+  fadeIn: number,
+  fadeOut: number,
+) {
+  const fades = normalizedFades(fadeIn, fadeOut, duration);
+  const now = active.context.currentTime;
+  const gain = active.nodes.envelopeGain.gain;
+  gain.cancelScheduledValues(now);
+
+  if (fades.fadeIn > elapsed) {
+    const current = fades.fadeIn > 0 ? elapsed / fades.fadeIn : 1;
+    gain.setValueAtTime(Math.max(0.0001, current), now);
+    gain.linearRampToValueAtTime(1, now + fades.fadeIn - elapsed);
+  } else if (fades.fadeOut > 0 && elapsed > duration - fades.fadeOut) {
+    const current = (duration - elapsed) / fades.fadeOut;
+    gain.setValueAtTime(Math.max(0.0001, current), now);
+  } else {
+    gain.setValueAtTime(1, now);
+  }
+
+  if (fades.fadeOut > 0) {
+    const fadeOutStart = duration - fades.fadeOut;
+    if (elapsed < fadeOutStart) {
+      gain.setValueAtTime(1, now + fadeOutStart - elapsed);
+      gain.linearRampToValueAtTime(0.0001, now + duration - elapsed);
+    } else {
+      gain.linearRampToValueAtTime(0.0001, now + Math.max(0.001, duration - elapsed));
+    }
+  }
 }
 
 function encodeWav(buffer: AudioBuffer, volume: number, normalize: boolean): Blob {
@@ -215,6 +330,7 @@ export function AudioEditor({ blob, filename, onApply }: AudioEditorProps) {
   const [normalize, setNormalize] = useState(true);
   const [expanded, setExpanded] = useState(true);
   const [playing, setPlaying] = useState(false);
+  const [paused, setPaused] = useState(false);
   const [playhead, setPlayhead] = useState(0);
   const [rendering, setRendering] = useState(false);
   const [error, setError] = useState('');
@@ -222,15 +338,62 @@ export function AudioEditor({ blob, filename, onApply }: AudioEditorProps) {
 
   const stopPlayback = useCallback(() => {
     const active = playbackRef.current;
-    if (!active) return;
-    playbackRef.current = null;
-    window.clearInterval(active.timer);
-    active.source.onended = null;
-    try { active.source.stop(); } catch { /* already stopped */ }
-    void active.context.close().catch(() => undefined);
+    if (active) {
+      playbackRef.current = null;
+      if (active.timer !== null) window.clearInterval(active.timer);
+      active.source.onended = null;
+      try { active.source.stop(); } catch { /* already stopped */ }
+      void active.context.close().catch(() => undefined);
+    }
     setPlaying(false);
+    setPaused(false);
     setPlayhead(trimStart);
   }, [trimStart]);
+
+  const startProgressTimer = useCallback((active: PlaybackHandle) => {
+    if (active.timer !== null) window.clearInterval(active.timer);
+    active.timer = window.setInterval(() => {
+      if (playbackRef.current !== active) return;
+      const elapsed = elapsedPlayback(active);
+      setPlayhead(Math.min(trimEnd, trimStart + elapsed));
+    }, 40);
+  }, [trimEnd, trimStart]);
+
+  const pausePlayback = async () => {
+    const active = playbackRef.current;
+    if (!active || !playing) return;
+    if (active.timer !== null) {
+      window.clearInterval(active.timer);
+      active.timer = null;
+    }
+    try {
+      await active.context.suspend();
+      if (playbackRef.current !== active) return;
+      // Read the clock after suspend completes so the resume point cannot drift.
+      active.offset = Math.min(trimEnd - trimStart, elapsedPlayback(active));
+      setPlayhead(Math.min(trimEnd, trimStart + active.offset));
+      setPlaying(false);
+      setPaused(true);
+    } catch (reason) {
+      if (playbackRef.current !== active) return;
+      setError(reason instanceof Error ? reason.message : 'Не удалось поставить воспроизведение на паузу.');
+    }
+  };
+
+  const resumePlayback = async () => {
+    const active = playbackRef.current;
+    if (!active || !paused) return;
+    try {
+      await active.context.resume();
+      if (playbackRef.current !== active) return;
+      active.startedAt = active.context.currentTime;
+      setPlaying(true);
+      setPaused(false);
+      startProgressTimer(active);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Не удалось продолжить воспроизведение.');
+    }
+  };
 
   useEffect(() => {
     let alive = true;
@@ -278,7 +441,7 @@ export function AudioEditor({ blob, filename, onApply }: AudioEditorProps) {
       const active = playbackRef.current;
       if (active) {
         playbackRef.current = null;
-        window.clearInterval(active.timer);
+        if (active.timer !== null) window.clearInterval(active.timer);
         active.source.onended = null;
         try { active.source.stop(); } catch { /* already stopped */ }
         void active.context.close().catch(() => undefined);
@@ -290,7 +453,7 @@ export function AudioEditor({ blob, filename, onApply }: AudioEditorProps) {
   useEffect(() => () => {
     const active = playbackRef.current;
     if (active) {
-      window.clearInterval(active.timer);
+      if (active.timer !== null) window.clearInterval(active.timer);
       active.source.onended = null;
       try { active.source.stop(); } catch { /* already stopped */ }
       void active.context.close().catch(() => undefined);
@@ -319,17 +482,46 @@ export function AudioEditor({ blob, filename, onApply }: AudioEditorProps) {
     });
   }, [buffer]);
 
+  const rawPeak = useMemo(() => {
+    if (!buffer) return 0;
+    let peak = 0;
+    for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
+      const samples = buffer.getChannelData(channel);
+      for (let index = 0; index < samples.length; index += 1) {
+        peak = Math.max(peak, Math.abs(samples[index]));
+      }
+    }
+    return peak;
+  }, [buffer]);
+
+  const normalizationGain = normalize && rawPeak > 0 ? TARGET_PEAK / rawPeak : 1;
+
+  useEffect(() => {
+    const active = playbackRef.current;
+    if (!active) return;
+    const now = active.context.currentTime;
+    const target = (volume / 100) * normalizationGain;
+    active.nodes.low.gain.setTargetAtTime(bass, now, 0.018);
+    active.nodes.mid.gain.setTargetAtTime(mid, now, 0.018);
+    active.nodes.high.gain.setTargetAtTime(treble, now, 0.018);
+    active.nodes.panner.pan.setTargetAtTime(pan / 100, now, 0.018);
+    active.nodes.masterGain.gain.setTargetAtTime(target, now, 0.018);
+    active.nodes.dryGain.gain.setTargetAtTime(compression ? 0 : 1, now, 0.025);
+    active.nodes.wetGain.gain.setTargetAtTime(compression ? 1 : 0, now, 0.025);
+  }, [bass, mid, treble, pan, volume, normalize, normalizationGain, compression]);
+
+  useEffect(() => {
+    const active = playbackRef.current;
+    if (!active) return;
+    const elapsed = elapsedPlayback(active);
+    applyPlaybackFade(active, elapsed, trimEnd - trimStart, fadeIn, fadeOut);
+  }, [fadeIn, fadeOut, trimStart, trimEnd]);
+
   const segmentDuration = Math.max(MIN_SELECTION_SECONDS, trimEnd - trimStart);
   const maximumFade = Math.min(10, segmentDuration);
 
   const playSelection = async () => {
-    if (!buffer) return;
-    if (playing) {
-      stopPlayback();
-      return;
-    }
-
-    stopPlayback();
+    if (!buffer || playbackRef.current) return;
     setError('');
     const AudioContextCtor = window.AudioContext ||
       (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
@@ -343,58 +535,46 @@ export function AudioEditor({ blob, filename, onApply }: AudioEditorProps) {
       await context.resume();
       const source = context.createBufferSource();
       source.buffer = buffer;
-      const effectsEnd = connectEffects(context, source, {
-        bass, mid, treble, pan, compression,
-      });
-      const gain = context.createGain();
-      const rawPeak = peaks.length ? Math.max(...peaks) : 0;
-      const normalizationGain = normalize && rawPeak > 0 ? TARGET_PEAK / rawPeak : 1;
-      const targetGain = (volume / 100) * normalizationGain;
       const duration = trimEnd - trimStart;
-      const fades = normalizedFades(fadeIn, fadeOut, duration);
-      const now = context.currentTime;
-
-      gain.gain.setValueAtTime(fades.fadeIn > 0 ? 0 : targetGain, now);
-      if (fades.fadeIn > 0) {
-        gain.gain.linearRampToValueAtTime(targetGain, now + fades.fadeIn);
-      }
-      if (fades.fadeOut > 0) {
-        gain.gain.setValueAtTime(targetGain, now + Math.max(fades.fadeIn, duration - fades.fadeOut));
-        gain.gain.linearRampToValueAtTime(0.0001, now + duration);
-      }
-
-      effectsEnd.connect(gain);
-      gain.connect(context.destination);
-      source.start(now, trimStart, duration);
+      const nodes = createPlaybackGraph(context, source, {
+        bass, mid, treble, pan, compression, volume, normalizeGain: normalizationGain,
+      });
+      const active: PlaybackHandle = {
+        context,
+        source,
+        nodes,
+        timer: null,
+        startedAt: context.currentTime,
+        offset: 0,
+      };
+      playbackRef.current = active;
+      applyPlaybackFade(active, 0, duration, fadeIn, fadeOut);
+      source.start(context.currentTime, trimStart, duration);
       setPlaying(true);
+      setPaused(false);
       setPlayhead(trimStart);
+      startProgressTimer(active);
 
-      const timer = window.setInterval(() => {
-        if (playbackRef.current?.source !== source) return;
-        const elapsed = context.currentTime - now;
-        setPlayhead(Math.min(trimEnd, trimStart + elapsed));
-      }, 80);
-
-      playbackRef.current = { context, source, timer };
       source.onended = () => {
-        const active = playbackRef.current;
-        if (active?.source === source) {
-          playbackRef.current = null;
-          window.clearInterval(active.timer);
-          setPlaying(false);
-          setPlayhead(trimEnd);
-          void context.close().catch(() => undefined);
-        }
+        if (playbackRef.current !== active) return;
+        playbackRef.current = null;
+        if (active.timer !== null) window.clearInterval(active.timer);
+        setPlaying(false);
+        setPaused(false);
+        setPlayhead(trimEnd);
+        void context.close().catch(() => undefined);
       };
     } catch (reason) {
+      playbackRef.current = null;
       setError(reason instanceof Error ? reason.message : 'Не удалось воспроизвести фрагмент.');
       setPlaying(false);
+      setPaused(false);
     }
   };
 
   const applyProcessing = async () => {
     if (!buffer || rendering) return;
-    if (playing) stopPlayback();
+    if (playing || paused) stopPlayback();
     setRendering(true);
     setError('');
     try {
@@ -439,14 +619,14 @@ export function AudioEditor({ blob, filename, onApply }: AudioEditorProps) {
 
   const updateStart = (value: number) => {
     const next = clamp(value, 0, Math.max(0, trimEnd - MIN_SELECTION_SECONDS));
-    if (playing) stopPlayback();
+    if (playing || paused) stopPlayback();
     setTrimStart(next);
     setPlayhead(next);
   };
 
   const updateEnd = (value: number) => {
     const next = clamp(value, Math.min(buffer?.duration ?? value, trimStart + MIN_SELECTION_SECONDS), buffer?.duration ?? value);
-    if (playing) stopPlayback();
+    if (playing || paused) stopPlayback();
     setTrimEnd(next);
     setPlayhead(Math.min(playhead, next));
   };
@@ -459,6 +639,7 @@ export function AudioEditor({ blob, filename, onApply }: AudioEditorProps) {
     step: number,
     suffix: string,
     onChange: (next: number) => void,
+    disableWhilePlaying = false,
   ) => (
     <label className="block space-y-1.5">
       <span className="flex items-center justify-between text-[10.5px] text-mute">
@@ -473,7 +654,7 @@ export function AudioEditor({ blob, filename, onApply }: AudioEditorProps) {
         step={step}
         value={clamp(value, min, Math.max(min, max))}
         onChange={event => onChange(Number(event.target.value))}
-        disabled={loading || !buffer || rendering || playing}
+        disabled={loading || !buffer || rendering || (disableWhilePlaying && (playing || paused))}
       />
     </label>
   );
@@ -516,7 +697,8 @@ export function AudioEditor({ blob, filename, onApply }: AudioEditorProps) {
                 {formatTime(trimEnd - trimStart)} из {formatTime(buffer.duration)}
               </span>
             </div>
-            <div className="h-16 flex items-center gap-[2px] rounded-md bg-ink-950/80 px-2 overflow-hidden">
+            <div className="relative h-16 rounded-md bg-ink-950/80 px-2 overflow-hidden">
+              <div className="absolute inset-0 flex items-center gap-[2px]">
               {peaks.map((peak, index) => {
                 const point = (index + 0.5) / peaks.length * buffer.duration;
                 const selected = point >= trimStart && point <= trimEnd;
@@ -532,6 +714,18 @@ export function AudioEditor({ blob, filename, onApply }: AudioEditorProps) {
                   />
                 );
               })}
+              </div>
+              <div aria-hidden="true" className="absolute inset-y-0 left-2 right-2 z-10 pointer-events-none">
+                <div
+                  className="absolute top-0 bottom-0 w-[2px]"
+                  style={{
+                    left: `${(buffer.duration > 0 ? clamp(playhead / buffer.duration, 0, 1) : 0) * 100}%`,
+                    transform: 'translateX(-1px)',
+                    background: '#ffffff',
+                    boxShadow: '0 0 7px 2px rgba(255,255,255,.65)',
+                  }}
+                />
+              </div>
             </div>
             <div className="flex items-center justify-between text-[9px] text-mute tabular-nums">
               <span>{formatTime(0)}</span>
@@ -543,8 +737,8 @@ export function AudioEditor({ blob, filename, onApply }: AudioEditorProps) {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-5 gap-y-3">
               <div className="space-y-3">
                 <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-200">Монтаж</div>
-                {renderSlider('Начало фрагмента', trimStart, 0, buffer.duration - MIN_SELECTION_SECONDS, 0.05, ' с', updateStart)}
-                {renderSlider('Конец фрагмента', trimEnd, trimStart + MIN_SELECTION_SECONDS, buffer.duration, 0.05, ' с', updateEnd)}
+                {renderSlider('Начало фрагмента', trimStart, 0, buffer.duration - MIN_SELECTION_SECONDS, 0.05, ' с', updateStart, true)}
+                {renderSlider('Конец фрагмента', trimEnd, trimStart + MIN_SELECTION_SECONDS, buffer.duration, 0.05, ' с', updateEnd, true)}
                 {renderSlider('Плавное появление', fadeIn, 0, maximumFade, 0.1, ' с', setFadeIn)}
                 {renderSlider('Плавное затухание', fadeOut, 0, maximumFade, 0.1, ' с', setFadeOut)}
               </div>
@@ -563,7 +757,7 @@ export function AudioEditor({ blob, filename, onApply }: AudioEditorProps) {
                 </div>
                 <div className="flex flex-wrap gap-x-4 gap-y-2 pt-1">
                   <label className="flex items-center gap-2 text-[10.5px] text-mute">
-                    <input type="checkbox" checked={compression} onChange={event => setCompression(event.target.checked)} disabled={rendering || playing} />
+                    <input type="checkbox" checked={compression} onChange={event => setCompression(event.target.checked)} disabled={rendering} />
                     Лёгкая компрессия
                   </label>
                   <label className="flex items-center gap-2 text-[10.5px] text-mute">
@@ -582,15 +776,46 @@ export function AudioEditor({ blob, filename, onApply }: AudioEditorProps) {
           )}
 
           <div className="flex flex-wrap items-center gap-2 border-t border-ink-700 pt-3">
-            <button
-              type="button"
-              className="btn !px-3 !py-2"
-              onClick={playSelection}
-              disabled={rendering}
-            >
-              {playing ? <Square size={13} /> : <Play size={13} />}
-              {playing ? 'Остановить' : 'Прослушать фрагмент'}
-            </button>
+            {!playing && !paused && (
+              <button
+                type="button"
+                className="btn !px-3 !py-2"
+                onClick={playSelection}
+                disabled={rendering}
+              >
+                <Play size={13} /> Прослушать
+              </button>
+            )}
+            {playing && (
+              <button
+                type="button"
+                className="btn !px-3 !py-2"
+                onClick={pausePlayback}
+                disabled={rendering}
+              >
+                <Pause size={13} /> Пауза
+              </button>
+            )}
+            {paused && (
+              <button
+                type="button"
+                className="btn !px-3 !py-2"
+                onClick={resumePlayback}
+                disabled={rendering}
+              >
+                <Play size={13} /> Продолжить
+              </button>
+            )}
+            {(playing || paused) && (
+              <button
+                type="button"
+                className="btn !px-3 !py-2"
+                onClick={stopPlayback}
+                disabled={rendering}
+              >
+                <Square size={13} /> Стоп
+              </button>
+            )}
             <div className="flex items-center gap-2 min-w-[130px] flex-1">
               <Volume2 size={13} className="text-mute" />
               <div className="h-1.5 flex-1 rounded-full bg-ink-700 overflow-hidden">
@@ -623,6 +848,9 @@ export function AudioEditor({ blob, filename, onApply }: AudioEditorProps) {
               {rendering ? 'Обработка…' : 'Применить обработку'}
             </button>
           </div>
+          <p className="text-[9px] text-mute leading-relaxed">
+            Громкость, панорама, эквалайзер, компрессия и плавные переходы меняются прямо во время прослушивания. Точки обрезки фиксируются на время воспроизведения.
+          </p>
           <p className="text-[9px] text-mute leading-relaxed">
             Обработка не меняет исходный файл до нажатия «Применить обработку». Результат сохраняется как WAV и затем добавляется в ассеты.
           </p>
