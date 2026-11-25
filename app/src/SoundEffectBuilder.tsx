@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AudioLines, Check, Loader2, Play, Save, Sparkles, X } from 'lucide-react';
+import { Check, Loader2, Play, Save, Sparkles, X } from 'lucide-react';
 import { renderProceduralEffect, type EffectPattern, type ProceduralEffectOptions } from './audio';
 import { useStore } from './store';
 
