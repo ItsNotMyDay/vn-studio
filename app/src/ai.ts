@@ -4,6 +4,15 @@ import type { Character } from './store';
 
 export type LocalQuantizationMode = 'int4' | 'fp16' | 'none';
 
+export interface OpenAiConnection {
+  id: string;
+  name: string;
+  baseUrl: string;
+  apiKey: string;
+  projectId: string;
+  model: string;
+}
+
 export interface AiSettings {
   endpoint: string;
   modelId: string;
@@ -14,6 +23,8 @@ export interface AiSettings {
   openaiApiKey: string;
   openaiProject: string;
   openaiModel: string;
+  openaiConnections: OpenAiConnection[];
+  activeOpenAiConnectionId: string;
   steps: number;
   guidance: number;
   width: number;
@@ -34,6 +45,8 @@ export const AI_DEFAULT: AiSettings = {
   openaiApiKey: '',
   openaiProject: '',
   openaiModel: 'deepseek-flash',
+  openaiConnections: [],
+  activeOpenAiConnectionId: '',
   steps: 8,
   guidance: 1.0,
   width: 768,
@@ -43,6 +56,12 @@ export const AI_DEFAULT: AiSettings = {
   autoLoad: true,
   transparent: true,
 };
+
+function makeOpenAiConnectionName(baseUrl: string, model: string): string {
+  let host = baseUrl.trim();
+  try { host = new URL(baseUrl).host || host; } catch {}
+  return model.trim() ? `${model.trim()} · ${host}` : host;
+}
 
 export function loadAiSettings(): AiSettings {
   try {
@@ -60,10 +79,68 @@ export function loadAiSettings(): AiSettings {
           saved.openaiModel = AI_DEFAULT.openaiModel;
           migrated = true;
         }
-        if (migrated) {
-          try { localStorage.setItem('vn-studio-ai', JSON.stringify(saved)); } catch {}
+
+        let connections: OpenAiConnection[] = Array.isArray(saved.openaiConnections)
+          ? saved.openaiConnections.filter((item: any) =>
+              item && typeof item.id === 'string' && typeof item.baseUrl === 'string' &&
+              typeof item.apiKey === 'string' && typeof item.model === 'string'
+            ).map((item: any) => ({
+              id: item.id,
+              name: typeof item.name === 'string' && item.name.trim()
+                ? item.name
+                : makeOpenAiConnectionName(item.baseUrl, item.model),
+              baseUrl: item.baseUrl,
+              apiKey: item.apiKey,
+              projectId: typeof item.projectId === 'string' ? item.projectId : '',
+              model: item.model,
+            }))
+          : [];
+
+        // Migrate the single-connection format used by older VN Studio versions.
+        if (connections.length === 0 && (saved.openaiApiKey || saved.llmProvider === 'openai')) {
+          const baseUrl = typeof saved.openaiBaseUrl === 'string' ? saved.openaiBaseUrl : AI_DEFAULT.openaiBaseUrl;
+          const model = typeof saved.openaiModel === 'string' ? saved.openaiModel : '';
+          connections = [{
+            id: 'legacy-openai-default',
+            name: makeOpenAiConnectionName(baseUrl, model),
+            baseUrl,
+            apiKey: typeof saved.openaiApiKey === 'string' ? saved.openaiApiKey : '',
+            projectId: typeof saved.openaiProject === 'string' ? saved.openaiProject : '',
+            model,
+          }];
+          migrated = true;
         }
-        return { ...AI_DEFAULT, ...saved };
+
+        let activeId = typeof saved.activeOpenAiConnectionId === 'string' ? saved.activeOpenAiConnectionId : '';
+        if (!connections.some(item => item.id === activeId) && connections.length) {
+          const matching = connections.find(item =>
+            item.baseUrl === saved.openaiBaseUrl &&
+            item.apiKey === saved.openaiApiKey &&
+            item.projectId === (saved.openaiProject || '') &&
+            item.model === saved.openaiModel
+          );
+          activeId = matching?.id ?? connections[0].id;
+          migrated = true;
+        }
+
+        const active = connections.find(item => item.id === activeId);
+        const settings: AiSettings = {
+          ...AI_DEFAULT,
+          ...saved,
+          openaiConnections: connections,
+          activeOpenAiConnectionId: activeId,
+        };
+        if (active) {
+          settings.openaiBaseUrl = active.baseUrl;
+          settings.openaiApiKey = active.apiKey;
+          settings.openaiProject = active.projectId;
+          settings.openaiModel = active.model;
+        }
+
+        if (migrated) {
+          try { localStorage.setItem('vn-studio-ai', JSON.stringify(settings)); } catch {}
+        }
+        return settings;
       }
     }
   } catch {}

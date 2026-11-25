@@ -1475,10 +1475,12 @@ function AiModelsPanel() {
   const openAddModel = (kind: 'llm' | 'image') => {
     setHfUrl('');
     setHfKind(kind);
-    setApiBase(cfg.openaiBaseUrl);
-    setApiKey(cfg.openaiApiKey);
-    setApiProject(cfg.openaiProject || '');
-    setApiModel(cfg.openaiModel);
+    // A new API form starts empty so credentials from the active connection
+    // cannot be accidentally overwritten by editing the next provider.
+    setApiBase('');
+    setApiKey('');
+    setApiProject('');
+    setApiModel('');
     setAddMode('choice');
   };
 
@@ -1563,12 +1565,36 @@ function AiModelsPanel() {
           throw new Error('Модель ' + selected + ' не найдена в /models. Проверьте её ID.');
         }
       }
+      const saved = loadAiSettings();
+      const existing = saved.openaiConnections.find(item =>
+        item.baseUrl === normalized &&
+        item.apiKey === apiKey.trim() &&
+        item.projectId === projectId &&
+        item.model === selected
+      );
+      const host = new URL(normalized).host;
+      const baseName = `${selected} · ${host}`;
+      const sameNameCount = saved.openaiConnections.filter(item => item.name === baseName).length;
+      const connection = existing ?? {
+        id: `api-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+        name: sameNameCount ? `${baseName} (${sameNameCount + 1})` : baseName,
+        baseUrl: normalized,
+        apiKey: apiKey.trim(),
+        projectId,
+        model: selected,
+      };
+      const connections = existing
+        ? saved.openaiConnections
+        : [...saved.openaiConnections, connection];
+
       patch({
         llmProvider: 'openai',
-        openaiBaseUrl: normalized,
-        openaiApiKey: apiKey.trim(),
-        openaiProject: projectId,
-        openaiModel: selected,
+        openaiBaseUrl: connection.baseUrl,
+        openaiApiKey: connection.apiKey,
+        openaiProject: connection.projectId,
+        openaiModel: connection.model,
+        openaiConnections: connections,
+        activeOpenAiConnectionId: connection.id,
       });
       setRemoteOk(true);
       setAddMode(null);
@@ -1631,6 +1657,8 @@ function AiModelsPanel() {
   if (cfg.modelPath && !imgOptions.some(o => o.path === cfg.modelPath)) imgOptions.unshift({ id: modelNameOf(cfg.modelPath), path: cfg.modelPath });
   const llmOptions = [...list.llm];
   if (cfg.llmPath && !llmOptions.some(o => o.path === cfg.llmPath)) llmOptions.unshift({ id: modelNameOf(cfg.llmPath), path: cfg.llmPath });
+  const activeOpenAiConnection = cfg.openaiConnections.find(item => item.id === cfg.activeOpenAiConnectionId)
+    ?? cfg.openaiConnections[0];
 
   return (
     <>
@@ -1694,19 +1722,45 @@ function AiModelsPanel() {
         <div className="flex gap-1.5">
           <select
             className="select min-w-0 flex-1"
-            value={cfg.llmProvider === 'openai' ? '__openai__' : cfg.llmPath}
+            value={cfg.llmProvider === 'openai' ? (activeOpenAiConnection ? `__openai__:${activeOpenAiConnection.id}` : '__openai__') : cfg.llmPath}
             onChange={e => {
-              if (e.target.value === '__add_model__') {
+              const value = e.target.value;
+              if (value === '__add_model__') {
                 openAddModel('llm');
                 return;
               }
-              if (e.target.value === '__openai__') patch({ llmProvider: 'openai' });
-              else patch({ llmProvider: 'local', llmPath: e.target.value });
+              if (value.startsWith('__openai__:')) {
+                const connectionId = value.slice('__openai__:'.length);
+                const connection = cfg.openaiConnections.find(item => item.id === connectionId);
+                if (connection) {
+                  patch({
+                    llmProvider: 'openai',
+                    openaiBaseUrl: connection.baseUrl,
+                    openaiApiKey: connection.apiKey,
+                    openaiProject: connection.projectId,
+                    openaiModel: connection.model,
+                    activeOpenAiConnectionId: connection.id,
+                  });
+                }
+                return;
+              }
+              if (value === '__openai__') {
+                patch({ llmProvider: 'openai' });
+                return;
+              }
+              patch({ llmProvider: 'local', llmPath: value });
             }}
           >
             <option value="">— по умолчанию (VN_LLM_PATH) —</option>
             {llmOptions.map(o => <option key={o.path} value={o.path}>{o.id}</option>)}
-            <option value="__openai__">API · {cfg.openaiModel || 'не настроен'}</option>
+            {cfg.openaiConnections.map(connection => (
+              <option key={connection.id} value={`__openai__:${connection.id}`}>
+                API · {connection.name || connection.model}
+              </option>
+            ))}
+            {!cfg.openaiConnections.length && cfg.llmProvider === 'openai' && (
+              <option value="__openai__">API · {cfg.openaiModel || 'не настроен'}</option>
+            )}
             <option value="__add_model__">＋ Добавить модель</option>
           </select>
         </div>
