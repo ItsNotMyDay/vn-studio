@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { AudioLines, Check, Loader2, Music2, X } from 'lucide-react';
 import { useStore } from './store';
 import { aiAudioGenerate, aiAudioHealth, type JobState } from './ai';
+import { AudioEditor } from './AudioEditor';
 
 export interface AiAudioTarget {
   nodeId: string;
@@ -187,16 +188,6 @@ export function AiAudioDialog({
               </div>
             )}
 
-            {result && (
-              <div className="rounded-xl border border-ink-600 bg-ink-900/60 p-3 space-y-2">
-                <div className="flex items-center gap-2 text-[11px] text-lime">
-                  <Check size={13} /> Результат готов к прослушиванию
-                </div>
-                <audio controls src={result.url} className="w-full" />
-                <div className="text-[10px] text-mute">{result.filename} · {duration} сек.</div>
-              </div>
-            )}
-
             {error && (
               <div className="text-[12px] rounded-lg border border-danger/50 bg-danger/10 text-danger px-3 py-2 leading-snug whitespace-pre-wrap">
                 {error}
@@ -274,6 +265,20 @@ export function AiAudioDialog({
             )}
           </div>
         </div>
+
+        {result && (
+          <div className="px-4 pb-4">
+            <AudioEditor
+              blob={result.blob}
+              filename={result.filename}
+              onApply={blob => {
+                const url = URL.createObjectURL(blob);
+                setResult(current => current ? { ...current, blob, url, filename: current.filename.replace(/\.[^.]+$/, '.wav') } : current);
+                s.toast('Обработка аудио применена');
+              }}
+            />
+          </div>
+        )}
       </div>
     </div>
   );
