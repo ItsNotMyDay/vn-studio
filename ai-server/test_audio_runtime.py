@@ -96,6 +96,87 @@ class AudioRuntimeTests(unittest.TestCase):
             finally:
                 runtime.shutdown()
 
+    @patch.object(AudioRuntime, "_run_command")
+    def test_sync_environment_repairs_locked_dependencies(self, run_command):
+        with tempfile.TemporaryDirectory() as temp:
+            runtime = AudioRuntime(base_dir=temp, port=18766)
+            try:
+                runtime.repo_dir.mkdir(parents=True)
+                if __import__("os").name == "nt":
+                    python_path = runtime.repo_dir / ".venv" / "Scripts" / "python.exe"
+                else:
+                    python_path = runtime.repo_dir / ".venv" / "bin" / "python"
+                python_path.parent.mkdir(parents=True)
+                python_path.touch()
+
+                with patch(
+                    "audio_runtime.subprocess.run",
+                    return_value=CompletedProcess(
+                        args=[], returncode=0, stdout="", stderr=""
+                    ),
+                ) as probe:
+                    runtime._sync_environment(
+                        "job123",
+                        ["uv"],
+                        "Проверка зависимостей",
+                        0.12,
+                    )
+
+                command, cwd, env, job_id, stage, progress = run_command.call_args.args[:6]
+                self.assertEqual(
+                    command,
+                    [
+                        "uv",
+                        "sync",
+                        "--project",
+                        str(runtime.repo_dir),
+                        "--python",
+                        "3.11",
+                        "--no-dev",
+                        "--locked",
+                    ],
+                )
+                self.assertEqual(cwd, runtime.repo_dir)
+                self.assertEqual(env["UV_PROJECT_ENVIRONMENT"], str(runtime.repo_dir / ".venv"))
+                self.assertEqual(job_id, "job123")
+                self.assertEqual(stage, "Проверка зависимостей")
+                self.assertEqual(progress, 0.12)
+                probe.assert_called_once_with(
+                    [str(python_path), "-c", "import loguru"],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    check=False,
+                )
+            finally:
+                runtime.shutdown()
+
+    @patch.object(AudioRuntime, "_run_command")
+    def test_sync_environment_reports_missing_loguru_after_sync(self, run_command):
+        with tempfile.TemporaryDirectory() as temp:
+            runtime = AudioRuntime(base_dir=temp, port=18766)
+            try:
+                runtime.repo_dir.mkdir(parents=True)
+                if __import__("os").name == "nt":
+                    python_path = runtime.repo_dir / ".venv" / "Scripts" / "python.exe"
+                else:
+                    python_path = runtime.repo_dir / ".venv" / "bin" / "python"
+                python_path.parent.mkdir(parents=True)
+                python_path.touch()
+
+                with patch(
+                    "audio_runtime.subprocess.run",
+                    return_value=CompletedProcess(
+                        args=[], returncode=1, stdout="", stderr="No module named loguru"
+                    ),
+                ):
+                    with self.assertRaisesRegex(RuntimeError, "loguru всё ещё недоступен"):
+                        runtime._sync_environment(
+                            "job123", ["uv"], "Проверка зависимостей", 0.12
+                        )
+            finally:
+                runtime.shutdown()
+
     def test_api_server_command_uses_venv_python_module(self):
         with tempfile.TemporaryDirectory() as temp:
             runtime = AudioRuntime(base_dir=temp, port=18766)
