@@ -129,14 +129,17 @@ export function FloatingWindow({
       onPointerCancel={endDrag}
     >
       <div className="absolute top-2 right-12 z-[160] flex items-center gap-1">
-        <button className="btn !px-1.5 !py-1 shadow-lg" title="Свернуть окно" onClick={() => { setMinimized(true); activateMainWindow(); }}>
+        <button className="btn !px-1.5 !py-1 shadow-lg" title="Свернуть окно" onClick={() => { setMinimized(true); closeFloatingWindow(id); }}>
           <Minimize2 size={12} />
         </button>
         <button className="btn !px-1.5 !py-1 shadow-lg" title={maximized ? "Восстановить размер" : "Развернуть на весь экран"} onClick={maximize}>
           <Maximize2 size={12} />
         </button>
       </div>
-      <div className="vn-floating-content min-w-0 max-h-[calc(100vh-16px)] overflow-auto rounded-xl shadow-2xl">
+      <div
+        className={`vn-floating-content min-w-0 max-h-[calc(100vh-16px)] overflow-auto rounded-xl shadow-2xl ${maximized ? 'vn-floating-maximized' : ''}`}
+        style={maximized ? { height: '100%' } : undefined}
+      >
         {children}
       </div>
     </div>
