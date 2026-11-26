@@ -37,6 +37,8 @@ function runtime(G: any) {
   let synth: { stop: () => void } | null = null;
   let musicStops: string[] = [];
   let line: any = null;
+  let dialogueQueue: any[] = [];
+  let dialogueIndex = 0;
   let typed = 0;
   let typeTimer: any = null;
   let pending: any = null;
@@ -257,6 +259,21 @@ function runtime(G: any) {
     }, 1000 / D.cps);
   }
 
+  function showDialogueReply(nodeId: string, reply: any) {
+    line = {
+      nodeId,
+      characterId: reply.characterId || 'global',
+      text: resolveTextVariables(reply.text || ''),
+      expression: reply.expression || 'neutral',
+    };
+    const key = 'character:' + line.characterId;
+    if (entities[key] && !entities[key].hiding) {
+      entities[key].expression = line.expression;
+      renderEntities();
+    }
+    startTypewriter();
+  }
+
   function finish() {
     stopMusic();
     endOv.classList.add('show');
@@ -321,6 +338,8 @@ function runtime(G: any) {
     if (musicStops.indexOf(id) >= 0) { stopMusic(); musicStops = musicStops.filter(x => x !== id); }
     pending = null; choices.classList.remove('show'); choices.innerHTML = '';
     waitClick = false; pauseHint.classList.remove('show');
+    dialogueQueue = [];
+    dialogueIndex = 0;
 
     switch (n.type) {
       case 'start': next(id); break;
@@ -376,10 +395,9 @@ function runtime(G: any) {
         return;
       }
       case 'dialogue': {
-        line = { nodeId: id, characterId: d.characterId, text: resolveTextVariables(d.text || ''), expression: d.expression || 'neutral' };
-        const key = 'character:' + d.characterId;
-        if (entities[key] && !entities[key].hiding) { entities[key].expression = line.expression; renderEntities(); }
-        startTypewriter();
+        dialogueQueue = Array.isArray(d.replies) && d.replies.length ? d.replies : [d];
+        dialogueIndex = 0;
+        showDialogueReply(id, dialogueQueue[0]);
         return;
       }
       case 'choice': {
@@ -432,8 +450,16 @@ function runtime(G: any) {
     if (waitClick) { waitClick = false; pauseHint.classList.remove('show'); guard = 0; next(scene.nodes.find((n: any) => n.id === lastPauseId)?.id || ''); return; }
     if (!line) return;
     if (typed < line.text.length) { typed = line.text.length; if (typeTimer) clearInterval(typeTimer); renderLine(); return; }
+    if (dialogueQueue.length && dialogueIndex < dialogueQueue.length - 1) {
+      dialogueIndex += 1;
+      showDialogueReply(line.nodeId, dialogueQueue[dialogueIndex]);
+      return;
+    }
+    const nodeId = line.nodeId;
+    dialogueQueue = [];
+    dialogueIndex = 0;
     guard = 0;
-    if (line.nodeId) next(line.nodeId);
+    if (nodeId) next(nodeId);
   }
 
   stage.addEventListener('click', () => advance());
@@ -449,7 +475,7 @@ function runtime(G: any) {
 
   function startGame() {
     resetVars();
-    entities = {}; bgId = null; musicStops = []; line = null; guard = 0;
+    entities = {}; bgId = null; musicStops = []; line = null; dialogueQueue = []; dialogueIndex = 0; guard = 0;
     stopMusic();
     renderEntities(); renderLine();
     scene = P.scenes[0];

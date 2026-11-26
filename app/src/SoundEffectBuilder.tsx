@@ -27,17 +27,29 @@ export function SoundEffectBuilder({ open, onClose }: { open: boolean; onClose: 
   const [preset, setPreset] = useState<SoundPreset>('click');
   const [settings, setSettings] = useState<ProceduralEffectOptions>(PRESETS.click.settings);
   const [name, setName] = useState(PRESETS.click.name);
-  const [previewUrl, setPreviewUrl] = useState('');
+  const previewUrlRef = useRef('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
+  const stopPreview = () => {
+    audioRef.current?.pause();
+    if (audioRef.current) {
+      audioRef.current.removeAttribute('src');
+      audioRef.current.load();
+    }
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current);
+      previewUrlRef.current = '';
+    }
+  };
+
   useEffect(() => {
     return () => {
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
       audioRef.current?.pause();
+      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
     };
-  }, [previewUrl]);
+  }, []);
 
   const totalDuration = useMemo(() => {
     const patternCount = PATTERNS.find(x => x.value === settings.pattern)?.value === 'single' ? 1
@@ -50,7 +62,7 @@ export function SoundEffectBuilder({ open, onClose }: { open: boolean; onClose: 
 
   const change = <K extends keyof ProceduralEffectOptions>(key: K, value: ProceduralEffectOptions[K]) => {
     setSettings(current => ({ ...current, [key]: value }));
-    setPreviewUrl('');
+    stopPreview();
     setError('');
   };
 
@@ -58,25 +70,26 @@ export function SoundEffectBuilder({ open, onClose }: { open: boolean; onClose: 
     setPreset(value);
     setSettings({ ...PRESETS[value].settings });
     setName(PRESETS[value].name);
-    setPreviewUrl('');
+    stopPreview();
     setError('');
   };
 
   const renderPreview = async () => {
     setBusy(true);
     setError('');
+    stopPreview();
     try {
       const blob = await renderProceduralEffect(settings);
       const url = URL.createObjectURL(blob);
-      setPreviewUrl(url);
-      window.setTimeout(() => {
-        if (audioRef.current) {
-          audioRef.current.src = url;
-          audioRef.current.play().catch(() => undefined);
-        }
-      }, 0);
+      previewUrlRef.current = url;
+      if (!audioRef.current) throw new Error('Аудиоплеер предпрослушивания недоступен.');
+      audioRef.current.src = url;
+      audioRef.current.currentTime = 0;
+      audioRef.current.onended = stopPreview;
+      await audioRef.current.play();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Не удалось создать предпрослушивание.');
+      stopPreview();
+      setError(reason instanceof Error ? reason.message : 'Не удалось воспроизвести сигнал.');
     } finally {
       setBusy(false);
     }
@@ -88,6 +101,7 @@ export function SoundEffectBuilder({ open, onClose }: { open: boolean; onClose: 
     try {
       const blob = await renderProceduralEffect(settings);
       await store.addTrackBlob(name.trim() || PRESETS[preset].name, blob, 'effect');
+      stopPreview();
       store.toast('Звуковой эффект добавлен в ассеты');
       onClose();
     } catch (reason) {
@@ -200,12 +214,7 @@ export function SoundEffectBuilder({ open, onClose }: { open: boolean; onClose: 
             </button>
           </div>
 
-          {previewUrl && (
-            <div className="rounded-lg border border-ink-700 bg-ink-900/60 p-3 space-y-2">
-              <div className="text-[10px] text-mute">Предпрослушивание · WAV</div>
-              <audio ref={audioRef} controls src={previewUrl} className="w-full" />
-            </div>
-          )}
+          <audio ref={audioRef} className="hidden" preload="auto" />
 
           {error && <div className="text-[11px] rounded-lg border border-danger/50 bg-danger/10 text-danger px-3 py-2">{error}</div>}
 

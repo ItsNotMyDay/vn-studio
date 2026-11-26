@@ -277,6 +277,7 @@ input[type='color']::-webkit-color-swatch { border: none; border-radius: 4px; }
   max-width: 100% !important;
   height: 100% !important;
   max-height: 100% !important;
+  border-radius: 0 !important;
 }
 /* Window closing is controlled by the dedicated floating-window title bar. */
 .vn-floating-content [data-floating-handle] > button[title^="Закрыть"] {

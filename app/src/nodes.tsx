@@ -9,6 +9,7 @@ import {
   type NodeKind, type VarType, type ChoiceCondition, MOVE_EFFECTS
 } from './store';
 import { useAssetURL } from './assets';
+import { getDialogueReplies } from './dialogue';
 
 export const BG_SWATCH: Record<string, string> = {
   park: 'linear-gradient(180deg,#2b1a4a,#ff6b3d 55%,#ffb454)',
@@ -110,18 +111,40 @@ function EndNode({ id, selected }: any) {
 }
 
 function DialogueNode({ id, data, selected }: any) {
-  const ch = useChar(data?.characterId);
+  const characters = useStore(s => s.project.characters);
+  const replies = getDialogueReplies(data, id);
+  const shown = replies.slice(0, 4);
   return (
-    <Card kind="dialogue" selected={selected} id={id}>
+    <Card kind="dialogue" selected={selected} width={270} id={id}>
       <Target />
-      <div className="flex items-center gap-1.5 mb-1">
-        <MessageSquare size={12} style={{ color: ch?.color ?? '#39d5ff' }} />
-        <span className="font-bold truncate" style={{ color: ch?.color ?? '#39d5ff' }}>{ch?.isNarrator ? 'Рассказчик · без текст-бара' : ch?.name ?? '— не выбран —'}</span>
-        <span className="chip !py-0 !px-1.5 !text-[9px] border-ink-600 text-mute shrink-0">{EXPR_RU[data?.expression] ?? 'спокойствие'}</span>
+      <div className="flex items-center gap-1.5 mb-1.5">
+        <MessageSquare size={12} style={{ color: '#39d5ff' }} />
+        <span className="font-bold">Сценарий диалога</span>
+        <span className="chip !py-0 !px-1.5 !text-[9px] border-ink-600 text-mute shrink-0">{replies.length} {replies.length === 1 ? 'реплика' : replies.length < 5 ? 'реплики' : 'реплик'}</span>
       </div>
-      <div className="text-paper/90 line-clamp-3 min-h-[3em]">{data?.text || <span className="text-mute italic">пустая реплика…</span>}</div>
+      <div className="space-y-1.5">
+        {shown.map(reply => {
+          const character = characters.find(item => item.id === reply.characterId);
+          const color = character?.color ?? '#39d5ff';
+          return (
+            <div key={reply.id} className="min-w-0">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="truncate font-semibold" style={{ color }}>
+                  {character?.isNarrator ? 'Рассказчик' : character?.name ?? '— не выбран —'}
+                </span>
+                <span className="shrink-0 text-[9px] text-mute">{EXPR_RU[reply.expression ?? 'neutral'] ?? 'спокойствие'}</span>
+              </div>
+              <div className="text-paper/90 line-clamp-2">
+                {reply.text || <span className="text-mute italic">пустая реплика…</span>}
+              </div>
+            </div>
+          );
+        })}
+        {replies.length > shown.length && (
+          <div className="text-[9px] text-mute">и ещё {replies.length - shown.length}…</div>
+        )}
+      </div>
       <Source />
-
     </Card>
   );
 }

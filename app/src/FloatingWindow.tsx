@@ -90,7 +90,7 @@ export function FloatingWindow({
   const [position, setPosition] = useState({ left: 70, top: 70 });
   const [zIndex, setZIndex] = useState(141);
   const [minimized, setMinimized] = useState(false);
-  const [maximized, setMaximized] = useState(false);
+  const [maximized, setMaximized] = useState(true);
   const restoreRef = useRef({ left: 70, top: 70 });
 
   useEffect(() => {
@@ -106,7 +106,11 @@ export function FloatingWindow({
       removeMinimizedWindow(id);
       return;
     }
-    if (!minimized) bringToFront();
+    // Every newly opened internal tool starts maximized. Restoring from the
+    // minimized dock keeps its current state because open does not change.
+    setMinimized(false);
+    setMaximized(true);
+    bringToFront();
     return () => {
       closeFloatingWindow(id);
       removeMinimizedWindow(id);
@@ -188,13 +192,15 @@ export function FloatingWindow({
   return createPortal((
     <div
       ref={rootRef}
-      className="fixed z-[140] flex min-w-0 flex-col overflow-hidden rounded-xl border border-ink-600 bg-ink-950 shadow-2xl"
+      className="fixed z-[140] flex min-w-0 flex-col overflow-hidden border border-ink-600 bg-ink-950 shadow-2xl"
       style={{
-        left: maximized ? 8 : position.left,
-        top: maximized ? 8 : position.top,
-        width: maximized ? 'calc(100vw - 16px)' : `min(${width}px, calc(100vw - 16px))`,
-        height: maximized ? 'calc(100vh - 16px)' : undefined,
-        maxHeight: 'calc(100vh - 16px)',
+        left: maximized ? 0 : position.left,
+        top: maximized ? 0 : position.top,
+        width: maximized ? '100vw' : `min(${width}px, calc(100vw - 16px))`,
+        height: maximized ? '100vh' : undefined,
+        maxHeight: maximized ? '100vh' : 'calc(100vh - 16px)',
+        borderRadius: maximized ? 0 : 12,
+        borderWidth: maximized ? 0 : 1,
         zIndex,
       }}
       onPointerDownCapture={e => { bringToFront(); startDrag(e as any); }}
