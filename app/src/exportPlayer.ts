@@ -162,10 +162,10 @@ function runtime(G: any) {
     Object.values(entities).sort((a: any, b: any) => a.z - b.z).forEach((e: any) => {
       const wrap = doc.createElement('div');
       wrap.className = 'ent';
-      wrap.style.left = e.x + '%'; wrap.style.top = e.y + '%'; wrap.style.height = '100%'; wrap.style.zIndex = String(e.z);
+      wrap.style.left = e.x + '%'; wrap.style.top = e.y + '%'; wrap.style.height = (e.scale == null ? 100 : e.scale) + '%'; wrap.style.zIndex = String(e.z);
       if (e.moveEase && !e.hiding) {
         const css = G.moveCss[e.moveEase] || 'ease';
-        wrap.style.transition = 'left ' + e.duration + 's ' + css + ', top ' + e.duration + 's ' + css;
+        wrap.style.transition = 'left ' + e.duration + 's ' + css + ', top ' + e.duration + 's ' + css + ', height ' + e.duration + 's ' + css;
       }
       const inner = doc.createElement('div');
       inner.className = 'ent-in' + (e.effect && e.effect !== 'none' ? ' fx-' + e.effect : '');
@@ -173,8 +173,8 @@ function runtime(G: any) {
       if (e.hiding) inner.style.animationDirection = 'reverse';
       const content = doc.createElement('div');
       content.style.height = '100%';
-      content.style.transform = 'rotate(' + (e.rotation == null ? 0 : e.rotation) + 'deg) scaleX(' + ((e.widthScale == null ? 100 : e.widthScale) / 100) + ') scaleY(' + ((e.scale == null ? 100 : e.scale) / 100) + ')';
-      content.style.transformOrigin = 'bottom center';
+      content.style.transform = 'rotate(' + (e.rotation == null ? 0 : e.rotation) + 'deg) scaleX(' + ((e.widthScale == null ? 100 : e.widthScale) / Math.max(10, (e.scale == null ? 100 : e.scale))) + ')';
+      content.style.transformOrigin = 'center center';
       if (e.moveEase && !e.hiding) content.style.transition = 'transform ' + e.duration + 's ' + (G.moveCss[e.moveEase] || 'ease');
       const c = e.kind === 'character' ? charById(e.refId) : null;
       if (e.kind === 'sprite' && e.spriteType === 'text') {
@@ -484,7 +484,7 @@ html,body{height:100%;background:var(--ink);color:var(--paper);font-family:'Sego
 .bglayer img{width:100%;height:100%;object-fit:cover}
 #dim{position:absolute;inset:0;background:#000;opacity:.25;z-index:1;pointer-events:none}
 #entities{position:absolute;inset:0;z-index:2;pointer-events:none}
-.ent{position:absolute;transform:translate(-50%,-100%);width:max-content;height:100%;display:flex;align-items:flex-end}
+.ent{position:absolute;transform:translate(-50%,-100%);width:max-content;display:flex;align-items:flex-end}
 .ent-in{height:100%}
 .ent-in img{height:100%;object-fit:contain;filter:drop-shadow(0 0 18px rgba(255,180,84,.25))}
 .bar{position:absolute;left:0;right:0;height:6vh;background:#000;z-index:18}
