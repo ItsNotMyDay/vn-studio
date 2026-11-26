@@ -4,7 +4,7 @@ import {
   BaseEdge, EdgeLabelRenderer, getBezierPath, useReactFlow,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { X, Search, Clapperboard } from 'lucide-react';
+import { X, Search, Clapperboard, Loader2, Save } from 'lucide-react';
 import { Toolbar, Sidebar, Inspector, DirectorConsole, PaletteDragGhost, Toasts } from './panels';
 import { nodeTypes } from './nodes';
 import { StagePreview } from './StagePreview';
@@ -250,7 +250,7 @@ function Shell() {
   const finishClose = async (saveChanges: boolean) => {
     if (closeState === 'shutting') return;
     setCloseError('');
-    if (saveChanges && !useStore.getState().save()) {
+    if (saveChanges && useStore.getState().activeProjectId && !useStore.getState().save()) {
       setCloseError('Не удалось сохранить проект. Проверьте свободное место в хранилище и повторите попытку.');
       setCloseState('confirm');
       return;
@@ -312,13 +312,13 @@ function Shell() {
     return () => window.removeEventListener('keydown', h);
   }, [closeState]);
 
-  if (!s.activeProjectId) return <Launcher />;
-
   return (
     <div
       className="h-screen w-screen flex flex-col bg-ink-950 text-paper overflow-hidden"
       onPointerDownCapture={() => activateMainWindow()}
     >
+      {s.activeProjectId ? (
+        <>
       <Toolbar />
       <div className="flex-1 min-h-0 flex">
         <Sidebar />
@@ -353,6 +353,8 @@ function Shell() {
           </button>
         </div>
       )}
+      </>
+      ) : <Launcher />}
       {closeState !== 'idle' && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-[#07080c] p-5">
           {closeState === 'confirm' ? (
