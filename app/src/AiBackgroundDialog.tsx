@@ -299,6 +299,7 @@ export function AiBackgroundDialog({ open, onClose }: { open: boolean; onClose: 
       </FloatingWindow>
       <QuantizationDialog
         open={quantizationOpen}
+        windowId="quantization-background"
         modelName={cfg.modelId}
         onClose={() => { setQuantizationOpen(false); setPendingSeed(undefined); }}
         onSelect={mode => {
