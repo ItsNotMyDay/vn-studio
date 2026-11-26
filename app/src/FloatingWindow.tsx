@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Copy, Minus, Square, X } from 'lucide-react';
 import { activateFloatingWindow, closeFloatingWindow, isFloatingWindowActive } from './windowFocus';
 
@@ -184,7 +185,7 @@ export function FloatingWindow({
 
   if (!open || minimized) return null;
 
-  return (
+  return createPortal((
     <div
       ref={rootRef}
       className="fixed z-[140] flex min-w-0 flex-col overflow-hidden rounded-xl border border-ink-600 bg-ink-950 shadow-2xl"
@@ -241,5 +242,5 @@ export function FloatingWindow({
         {children}
       </div>
     </div>
-  );
+  ), document.body);
 }
