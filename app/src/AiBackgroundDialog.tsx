@@ -297,6 +297,7 @@ export function AiBackgroundDialog({ open, onClose }: { open: boolean; onClose: 
             </div>
           </div>
         </div>
+      </div>
       </FloatingWindow>
       <QuantizationDialog
         open={quantizationOpen}
