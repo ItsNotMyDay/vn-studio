@@ -1319,8 +1319,8 @@ export function Inspector() {
                   <Field label="Y, %"><input className="input" type="number" step={0.5} min={-20} max={120} value={Math.round((d.y ?? 74) * 10) / 10} onChange={e => s.updateNodeData(node.id, { y: Number(e.target.value) })} /></Field>
                   <Field label="Z-индекс"><input className="input" type="number" min={0} max={40} placeholder="авто" value={d.z ? Math.round(d.z) : ''} onChange={e => s.updateNodeData(node.id, { z: e.target.value === '' ? 0 : Number(e.target.value) })} /></Field>
                 </div>
-                <Slider label="Позиция X" value={Math.round(d.x ?? 50)} min={-20} max={120} unit="%" onChange={v => s.updateNodeData(node.id, { x: v })} />
-                <Slider label="Позиция Y (низ объекта)" value={Math.round(d.y ?? 74)} min={-20} max={120} unit="%" onChange={v => s.updateNodeData(node.id, { y: v })} />
+                <Slider label="Позиция X" value={Math.round(d.x ?? 50)} min={-20} max={120} unit="%" editable onChange={v => s.updateNodeData(node.id, { x: v })} />
+                <Slider label="Позиция Y (низ объекта)" value={Math.round(d.y ?? 74)} min={-20} max={120} unit="%" editable onChange={v => s.updateNodeData(node.id, { y: v })} />
                 <Slider label="Высота" value={Math.round(d.scale ?? 100)} min={10} max={300} unit="%" editable onChange={v => s.updateNodeData(node.id, { scale: v })} />
                 <Slider label="Ширина" value={Math.round(d.widthScale ?? 100)} min={10} max={300} unit="%" editable onChange={v => s.updateNodeData(node.id, { widthScale: v })} />
                 <Slider label="Поворот" value={Math.round(d.rotation ?? 0)} min={-180} max={180} unit="°" editable onChange={v => s.updateNodeData(node.id, { rotation: v })} />
