@@ -1,5 +1,6 @@
 import base64
 import inspect
+import ipaddress
 import io
 import json
 import os
@@ -1674,7 +1675,11 @@ def shutdown_server(request: Request):
     # Only the local machine may stop its AI server. A client using a shared
     # network AI server must never be able to shut that remote process down.
     client_host = request.client.host if request.client else ""
-    if client_host not in ("127.0.0.1", "::1", "localhost"):
+    try:
+        is_local = ipaddress.ip_address(client_host).is_loopback
+    except ValueError:
+        is_local = client_host.lower() == "localhost"
+    if not is_local:
         raise HTTPException(403, "AI server shutdown is only allowed from localhost")
 
     def terminate_after_response():
