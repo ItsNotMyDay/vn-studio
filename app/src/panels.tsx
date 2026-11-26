@@ -2079,6 +2079,7 @@ function AiModelsPanel() {
 
     <QuantizationDialog
       open={quantizationTarget !== null}
+      windowId="quantization-model-manager"
       modelName={quantizationTarget === 'image' ? modelNameOf(cfg.modelPath || cfg.modelId) : modelNameOf(cfg.llmPath || 'VN_LLM_PATH')}
       onClose={() => setQuantizationTarget(null)}
       onSelect={mode => {
