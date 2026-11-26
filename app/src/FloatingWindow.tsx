@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Maximize2, Minimize2, X } from 'lucide-react';
-import { activateFloatingWindow } from './windowFocus';
+import { activateFloatingWindow, isFloatingWindowActive } from './windowFocus';
 
 let nextZIndex = 140;
 let nextOffset = 0;
@@ -37,6 +37,19 @@ export function FloatingWindow({
   useEffect(() => {
     if (open && !minimized) bringToFront();
   }, [open]);
+
+  useEffect(() => {
+    if (!open || minimized || !onClose) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && isFloatingWindowActive(id)) {
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [id, open, minimized, onClose]);
 
   const bringToFront = () => {
     nextZIndex += 1;
