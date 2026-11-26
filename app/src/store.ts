@@ -5,7 +5,7 @@ import * as audioEngine from './audio';
 import { getAssetURL, importFile, deleteBlob, revokeAssetURL, putBlob } from './assets';
 import { embeddingsSearch, embeddingsIndex, type ContextChunk, type RichContext } from './ai';
 import { resolveVariableText } from './textVariables';
-import { createDialogueReplyId, getDialogueReplies, mergeDialogueData } from './dialogue';
+import { createDialogueReplyId, getDialogueReplies, mergeDialogueData, type DialogueReply } from './dialogue';
 import {
   listProjects, readProject, writeProject, createProjectRecord, deleteProjectRecord,
   renameProjectRecord, duplicateProjectRecord, getActiveId, setActiveId, migrateLegacy,
@@ -433,6 +433,8 @@ interface PlayerState {
   finished: boolean;
   current: string | null;
   line: { id: number; nodeId: string; characterId: string; text: string; expression: string } | null;
+  dialogueReplies: DialogueReply[];
+  dialogueReplyIndex: number;
   pending: { nodeId: string; options: ChoiceOption[]; prompt: string } | null;
   preAsk: { nodeId: string; kind: 'menu' | 'condition'; title: string; items: string[] } | null;
   bg: string | null;
@@ -446,7 +448,7 @@ interface PlayerState {
   waitClick: boolean;
 }
 const playerIdle: PlayerState = {
-  running: false, finished: false, current: null, line: null, pending: null, preAsk: null,
+  running: false, finished: false, current: null, line: null, dialogueReplies: [], dialogueReplyIndex: 0, pending: null, preAsk: null,
   bg: null, bgFx: null, track: null, entities: {}, sprites: {}, vars: {}, musicStops: [],
   paused: false, waitClick: false,
 };
@@ -732,12 +734,15 @@ export const useStore = create<Store>((set, get) => {
         if (d.action === 'hide') delete entities[key];
         else applyEntityTo(entities, sprites, node.id, d, vars);
       }
-      if (node.type === 'dialogue' && d.characterId) {
-        const key = entityKey('character', d.characterId);
-        if (entities[key]) {
-          entities[key] = { ...entities[key], expression: d.expression ?? 'neutral' };
-          sprites[d.characterId] = { expression: d.expression ?? 'neutral' };
-        }
+      if (node.type === 'dialogue') {
+        getDialogueReplies(d, node.id).forEach(reply => {
+          if (!reply.characterId) return;
+          const key = entityKey('character', reply.characterId);
+          if (entities[key]) {
+            entities[key] = { ...entities[key], expression: reply.expression ?? 'neutral' };
+            sprites[reply.characterId] = { expression: reply.expression ?? 'neutral' };
+          }
+        });
       }
       if (node.type === 'variable') {
         const t: VarType = d.varType ?? varTypeOf(d.charId, d.key);
@@ -776,7 +781,7 @@ export const useStore = create<Store>((set, get) => {
       musicStop();
       set(s => ({ player: { ...s.player, track: null, musicStops: s.player.musicStops.filter(x => x !== id) } }));
     }
-    set(s => ({ player: { ...s.player, current: id, pending: null, preAsk: null } }));
+    set(s => ({ player: { ...s.player, current: id, pending: null, preAsk: null, dialogueReplies: [], dialogueReplyIndex: 0 } }));
 
     switch (node.type as NodeKind) {
       case 'start':
@@ -869,18 +874,28 @@ export const useStore = create<Store>((set, get) => {
       }
 
       case 'dialogue': {
+        const replies = getDialogueReplies(d, id);
+        const firstReply = replies[0] ?? { characterId: '', expression: 'neutral', text: '' };
         const seq = get().lineSeq + 1;
-        const expression = d.expression ?? 'neutral';
+        const expression = firstReply.expression ?? 'neutral';
         set(s => {
-          const key = entityKey('character', d.characterId);
-          const present = !!s.player.entities[key] && !s.player.entities[key].hiding;
+          const key = entityKey('character', firstReply.characterId ?? '');
+          const present = !!firstReply.characterId && !!s.player.entities[key] && !s.player.entities[key].hiding;
           return {
             lineSeq: seq,
             player: {
               ...s.player,
-              line: { id: seq, nodeId: id, characterId: d.characterId, text: resolveVariableText(String(d.text ?? ''), s.project.characters, s.player.vars), expression },
+              dialogueReplies: replies,
+              dialogueReplyIndex: 0,
+              line: {
+                id: seq,
+                nodeId: id,
+                characterId: firstReply.characterId ?? '',
+                text: resolveVariableText(String(firstReply.text ?? ''), s.project.characters, s.player.vars),
+                expression,
+              },
               entities: present ? { ...s.player.entities, [key]: { ...s.player.entities[key], expression } } : s.player.entities,
-              sprites: present ? { ...s.player.sprites, [d.characterId]: { expression } } : s.player.sprites,
+              sprites: present ? { ...s.player.sprites, [firstReply.characterId!]: { expression } } : s.player.sprites,
             },
           };
         });
@@ -938,17 +953,19 @@ export const useStore = create<Store>((set, get) => {
         scheduleHide(node.id, key, dur * 1000 + 60);
       }
     }
-    if (node.type === 'dialogue' && d.characterId) {
+    if (node.type === 'dialogue') {
       set(s => {
-        const key = entityKey('character', d.characterId);
-        const present = !!s.player.entities[key] && !s.player.entities[key].hiding;
-        return {
-          player: {
-            ...s.player,
-            entities: present ? { ...s.player.entities, [key]: { ...s.player.entities[key], expression: d.expression ?? 'neutral' } } : s.player.entities,
-            sprites: present ? { ...s.player.sprites, [d.characterId]: { expression: d.expression ?? 'neutral' } } : s.player.sprites,
-          },
-        };
+        const entities = { ...s.player.entities };
+        const sprites = { ...s.player.sprites };
+        getDialogueReplies(d, node.id).forEach(reply => {
+          if (!reply.characterId) return;
+          const key = entityKey('character', reply.characterId);
+          if (!entities[key] || entities[key].hiding) return;
+          const expression = reply.expression ?? 'neutral';
+          entities[key] = { ...entities[key], expression };
+          sprites[reply.characterId] = { expression };
+        });
+        return { player: { ...s.player, entities, sprites } };
       });
     }
     if (node.type === 'variable') {
@@ -1735,7 +1752,12 @@ export const useStore = create<Store>((set, get) => {
       for (const n of sc.nodes) {
         const d: any = n.data ?? {};
         if (n.type === 'dialogue') {
-          if (!d.characterId || !st.project.characters.some(c => c.id === d.characterId)) out.push({ nodeId: n.id, msg: 'Реплика без персонажа' });
+          const replies = getDialogueReplies(d, n.id);
+          replies.forEach((reply, index) => {
+            if (!reply.characterId || !st.project.characters.some(c => c.id === reply.characterId)) {
+              out.push({ nodeId: n.id, msg: `Диалог: в реплике ${index + 1} не выбран персонаж` });
+            }
+          });
         }
         if (n.type === 'background' && !st.project.backgrounds.some(b => b.id === d.bg)) out.push({ nodeId: n.id, msg: 'Фон не выбран или удалён' });
         if (n.type === 'music') {
@@ -1860,6 +1882,39 @@ export const useStore = create<Store>((set, get) => {
       if (p.waitClick) {
         set(s => ({ player: { ...s.player, waitClick: false, paused: false } }));
         next(p.current);
+        return;
+      }
+      const nextReplyIndex = p.dialogueReplyIndex + 1;
+      if (p.line && nextReplyIndex < p.dialogueReplies.length) {
+        const reply = p.dialogueReplies[nextReplyIndex];
+        const seq = get().lineSeq + 1;
+        const expression = reply.expression ?? 'neutral';
+        set(s => {
+          const entities = { ...s.player.entities };
+          const sprites = { ...s.player.sprites };
+          const key = entityKey('character', reply.characterId ?? '');
+          const present = !!reply.characterId && !!entities[key] && !entities[key].hiding;
+          if (present) {
+            entities[key] = { ...entities[key], expression };
+            sprites[reply.characterId!] = { expression };
+          }
+          return {
+            lineSeq: seq,
+            player: {
+              ...s.player,
+              dialogueReplyIndex: nextReplyIndex,
+              line: {
+                id: seq,
+                nodeId: p.line!.nodeId,
+                characterId: reply.characterId ?? '',
+                text: resolveVariableText(String(reply.text ?? ''), s.project.characters, s.player.vars),
+                expression,
+              },
+              entities,
+              sprites,
+            },
+          };
+        });
         return;
       }
       next(p.current);
