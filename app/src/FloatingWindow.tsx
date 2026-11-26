@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Maximize2, Minimize2, X } from 'lucide-react';
-import { activateFloatingWindow, isFloatingWindowActive } from './windowFocus';
+import { activateFloatingWindow, closeFloatingWindow, isFloatingWindowActive } from './windowFocus';
 
 let nextZIndex = 140;
 let nextOffset = 0;
@@ -35,7 +35,9 @@ export function FloatingWindow({
   }, [width, height]);
 
   useEffect(() => {
-    if (open && !minimized) bringToFront();
+    if (!open) return;
+    if (!minimized) bringToFront();
+    return () => closeFloatingWindow(id);
   }, [open]);
 
   useEffect(() => {
