@@ -15,7 +15,7 @@ import { characterVariableAlias, getVariableAutocomplete, type VariableAutocompl
 import { BG_SWATCH } from './nodes';
 import { audioEnsure, audioPad, audioFile, effectPlay } from './audio';
 import { useAssetURL, getAssetURL, getBlob, putBlob, revokeAssetURL } from './assets';
-import { launchPlayer, post } from './bus';
+import { post } from './bus';
 import { AiSpriteDialog } from './AiSpriteDialog';
 import { AiSpriteAssetDialog } from './AiSpriteAssetDialog';
 import { AiBackgroundDialog } from './AiBackgroundDialog';
@@ -247,7 +247,6 @@ function SpriteThumb({ c, expr, big = false }: any) {
 
 export function Toolbar() {
   const s = useStore();
-  const issues = s.issues();
   const [showIssues, setShowIssues] = useState(false);
   return (
     <div className="relative z-20 h-12 shrink-0 flex items-center gap-2 px-3 border-b border-ink-700 panel">
@@ -1351,39 +1350,6 @@ export function Inspector() {
           </div>
         )}
 
-        {!ch && !node && (
-          <div className="p-3 space-y-3">
-            <Field label="Название сцены">
-              <input className="input" value={sc?.name ?? ''} onChange={e => sc && s.renameScene(sc.id, e.target.value)} />
-            </Field>
-            <div className="grid grid-cols-3 gap-2 text-center">
-              {[['Нод', sc?.nodes.length ?? 0], ['Связей', sc?.edges.length ?? 0], ['Ошибок', issues.length]].map(([l, v]) => (
-                <div key={l as string} className="rounded-lg border border-ink-600 bg-ink-850 py-2">
-                  <div className="text-lg font-bold font-display" style={{ color: l === 'Ошибок' && (v as number) > 0 ? '#ffb454' : 'var(--accent)' }}>{v}</div>
-                  <div className="text-[10px] text-mute uppercase tracking-wider">{l}</div>
-                </div>
-              ))}
-            </div>
-            <button className="btn btn-primary w-full justify-center" onClick={() => launchPlayer(s.currentSceneId)}>
-              <Play size={13} /> Проиграть в отдельном окне
-            </button>
-            <div>
-              <div className="text-[10.5px] uppercase tracking-wider text-mute mb-1">Проверка сцены</div>
-              {issues.length === 0 && <div className="text-[12px] text-lime">Всё чисто. Нажмите Play.</div>}
-              <div className="space-y-1">
-                {issues.map((it, i) => (
-                  <button
-                    key={i}
-                    className="w-full text-left text-[12px] px-2 py-1.5 rounded border border-amber-glow/30 bg-amber-glow/10 text-amber-glow hover:bg-amber-glow/20"
-                    onClick={() => it.nodeId && s.selectNode(it.nodeId)}
-                  >
-                    {it.msg}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
       {sugPhase && (
