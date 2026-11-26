@@ -327,6 +327,9 @@ export function Sidebar() {
   const sceneHasUnsavedChanges = (scene: any) => {
     const saved = savedProject?.scenes?.find((item: any) => item.id === scene.id);
     if (!saved) return true;
+    const savedIndex = savedProject?.scenes?.findIndex((item: any) => item.id === scene.id) ?? -1;
+    const currentIndex = s.project.scenes.findIndex((item: any) => item.id === scene.id);
+    if (savedIndex !== currentIndex) return true;
     const clean = (value: any) => ({
       name: value.name,
       nodes: (value.nodes ?? []).map((node: any) => ({ ...node, selected: false })),
