@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { FloatingWindow } from './FloatingWindow';
 import { AlertTriangle, Check, Dice5, ImagePlus, Loader2, Server, Sparkles, X } from 'lucide-react';
 import { useStore } from './store';
 import {
@@ -225,15 +226,12 @@ export function AiSpriteAssetDialog({ open, onClose }: { open: boolean; onClose:
 
   return (
     <>
-      <div
-        className="fixed inset-0 z-[75] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
-        onClick={() => { if (!busy) onClose(); }}
-      >
+      <FloatingWindow id="ai-sprite-assets" title="AI-спрайт в ассеты" open={open} onClose={onClose} width={960} height={760}>
         <div
           className="panel border rounded-2xl w-[min(960px,96vw)] max-h-[92vh] overflow-y-auto shadow-2xl"
           onClick={e => e.stopPropagation()}
         >
-          <div className="sticky top-0 z-10 flex items-center gap-2 px-4 py-3 border-b border-ink-700 panel">
+          <div data-floating-handle className="sticky top-0 z-10 flex items-center gap-2 px-4 py-3 border-b border-ink-700 panel cursor-move">
             <ImagePlus size={15} style={{ color: 'var(--accent)' }} />
             <span className="font-display font-bold text-[13px] uppercase tracking-widest">AI-спрайт в ассеты</span>
             <div className="flex-1" />
@@ -384,7 +382,7 @@ export function AiSpriteAssetDialog({ open, onClose }: { open: boolean; onClose:
             </div>
           </div>
         </div>
-      </div>
+      </FloatingWindow>
 
       <QuantizationDialog
         open={quantizationOpen}
