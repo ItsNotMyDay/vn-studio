@@ -488,7 +488,7 @@ fn install_and_start_ai_server(
 
     let installed_revision = fs::read_to_string(&marker_path).unwrap_or_default();
     let install_marker = format!("{}|python=3.11|torch=2.7.1|backend=auto", AI_SERVER_REVISION);
-    let dependencies_ready = installed_revision.trim() == install_marker
+    let dependencies_ready = installed_revision.trim() == install_marker.as_str()
         && python_runtime_version(&python_exe).as_deref() == Some("3.11");
 
     // Keep one managed interpreter for the app, but isolate server and ACE-Step
