@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { FloatingWindow } from './FloatingWindow';
 import { Package, Monitor, Terminal, Smartphone, X, Check, Loader2, Download, AlertTriangle, FolderArchive } from 'lucide-react';
 import { useStore } from './store';
 import { compileWindows, type CompileProgress } from './exportPlayer';
@@ -42,9 +43,9 @@ export function CompileDialog({ open, onClose }: { open: boolean; onClose: () =>
   const mb = (b: number) => (b / 1024 / 1024).toFixed(1) + ' МБ';
 
   return (
-    <div className="fixed inset-0 z-[74] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={() => !busy && onClose()}>
+    <FloatingWindow id="compile-game" title="Компилировать игру" open={open} onClose={onClose} width={680} height={700}>
       <div className="panel border rounded-2xl w-[min(680px,94vw)] max-h-[88vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
-        <div className="sticky top-0 z-10 flex items-center gap-2 px-4 py-3 border-b border-ink-700 panel">
+        <div data-floating-handle className="sticky top-0 z-10 flex items-center gap-2 px-4 py-3 border-b border-ink-700 panel cursor-move">
           <Package size={15} style={{ color: 'var(--accent)' }} />
           <span className="font-display font-bold text-[13px] uppercase tracking-widest">Компилировать игру</span>
           <div className="flex-1" />
@@ -137,6 +138,6 @@ export function CompileDialog({ open, onClose }: { open: boolean; onClose: () =>
           </div>
         </div>
       </div>
-    </div>
+    </FloatingWindow>
   );
 }
