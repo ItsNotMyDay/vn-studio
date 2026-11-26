@@ -488,6 +488,11 @@ fn install_and_start_ai_server(
         )?;
 
         if !python_exe.is_file() {
+            // Recover from an interrupted venv creation instead of retrying into a partial directory.
+            if venv_dir.exists() {
+                fs::remove_dir_all(&venv_dir)
+                    .map_err(|error| format!("Не удалось очистить неполное окружение Python: {error}"))?;
+            }
             let venv_args = vec![
                 "venv".to_string(),
                 "--python".to_string(),
