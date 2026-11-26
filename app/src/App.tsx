@@ -10,6 +10,7 @@ import { nodeTypes } from './nodes';
 import { StagePreview } from './StagePreview';
 import { CompiledPreviewWindow } from './CompiledPreviewWindow';
 import { Stage } from './stage';
+import { FloatingWindow } from './FloatingWindow';
 import { activateMainWindow, isMainWindowActive } from './windowFocus';
 import { LlmChat } from './LlmChat';
 import { Launcher } from './Launcher';
@@ -334,24 +335,34 @@ function Shell() {
       <CompiledPreviewWindow open={s.compiledPreviewOpen} onClose={() => s.setCompiledPreviewOpen(false)} />
       
       {s.playOverlay && (
-        <div className="fixed inset-0 z-[80] bg-ink-950">
-          <Stage full />
-          <div className="fixed top-3 left-3 z-[85] flex items-center gap-2">
-            <span className="chip !text-[11px]" style={{ borderColor: 'var(--accent)', color: 'var(--accent)', background: '#0b0e15dd' }}>
-              предпросмотр с ноды
-            </span>
-            <span className="chip !text-[11px] border-ink-600 text-mute" style={{ background: '#0b0e15dd' }}>
-              {s.scene()?.name}
-            </span>
+        <FloatingWindow
+          id="node-playback-preview"
+          title="Предпросмотр с ноды"
+          open={s.playOverlay}
+          onClose={() => { useStore.getState().stop(); useStore.getState().setPlayOverlay(false); }}
+          width={1120}
+          height={780}
+        >
+          <div className="relative w-full h-[min(82vh,760px)] border border-ink-600 rounded-xl overflow-hidden panel">
+            <div data-floating-handle className="absolute top-0 inset-x-0 z-[85] h-10 px-3 flex items-center gap-2 border-b border-ink-700 bg-ink-950/90 backdrop-blur cursor-move">
+              <span className="chip !text-[11px]" style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>
+                предпросмотр с ноды
+              </span>
+              <span className="chip !text-[11px] border-ink-600 text-mute">{s.scene()?.name}</span>
+              <div className="flex-1" />
+              <button
+                className="btn btn-danger"
+                onClick={() => { useStore.getState().stop(); useStore.getState().setPlayOverlay(false); }}
+                title="Закрыть предпросмотр"
+              >
+                <X size={13} /> Закрыть
+              </button>
+            </div>
+            <div className="absolute inset-0 pt-10">
+              <Stage full windowId="node-playback-preview" />
+            </div>
           </div>
-          <button
-            className="btn btn-danger fixed top-3 right-3 z-[85]"
-            onClick={() => { useStore.getState().stop(); useStore.getState().setPlayOverlay(false); }}
-            title="Закрыть предпросмотр (Esc)"
-          >
-            <X size={13} /> Закрыть предпросмотр
-          </button>
-        </div>
+        </FloatingWindow>
       )}
       </>
       ) : <Launcher />}
