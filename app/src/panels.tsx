@@ -1317,16 +1317,13 @@ export function Inspector() {
                 <div className="grid grid-cols-2 gap-2">
                   <Field label="X, %"><input className="input" type="number" step={0.5} min={-20} max={120} value={Math.round((d.x ?? 50) * 10) / 10} onChange={e => s.updateNodeData(node.id, { x: Number(e.target.value) })} /></Field>
                   <Field label="Y, %"><input className="input" type="number" step={0.5} min={-20} max={120} value={Math.round((d.y ?? 74) * 10) / 10} onChange={e => s.updateNodeData(node.id, { y: Number(e.target.value) })} /></Field>
-                  <Field label="Высота, %"><input className="input" type="number" min={10} max={300} value={Math.round(d.scale ?? 100)} onChange={e => s.updateNodeData(node.id, { scale: Number(e.target.value) })} /></Field>
-                  <Field label="Ширина, %"><input className="input" type="number" min={10} max={300} value={Math.round(d.widthScale ?? 100)} onChange={e => s.updateNodeData(node.id, { widthScale: Number(e.target.value) })} /></Field>
-                  <Field label="Поворот, °"><input className="input" type="number" min={-180} max={180} value={Math.round(d.rotation ?? 0)} onChange={e => s.updateNodeData(node.id, { rotation: Number(e.target.value) })} /></Field>
                   <Field label="Z-индекс"><input className="input" type="number" min={0} max={40} placeholder="авто" value={d.z ? Math.round(d.z) : ''} onChange={e => s.updateNodeData(node.id, { z: e.target.value === '' ? 0 : Number(e.target.value) })} /></Field>
                 </div>
                 <Slider label="Позиция X" value={Math.round(d.x ?? 50)} min={-20} max={120} unit="%" onChange={v => s.updateNodeData(node.id, { x: v })} />
                 <Slider label="Позиция Y (низ объекта)" value={Math.round(d.y ?? 74)} min={-20} max={120} unit="%" onChange={v => s.updateNodeData(node.id, { y: v })} />
-                <Slider label="Высота" value={Math.round(d.scale ?? 100)} min={10} max={300} unit="%" onChange={v => s.updateNodeData(node.id, { scale: v })} />
-                <Slider label="Ширина" value={Math.round(d.widthScale ?? 100)} min={10} max={300} unit="%" onChange={v => s.updateNodeData(node.id, { widthScale: v })} />
-                <Slider label="Поворот" value={Math.round(d.rotation ?? 0)} min={-180} max={180} unit="°" onChange={v => s.updateNodeData(node.id, { rotation: v })} />
+                <Slider label="Высота" value={Math.round(d.scale ?? 100)} min={10} max={300} unit="%" editable onChange={v => s.updateNodeData(node.id, { scale: v })} />
+                <Slider label="Ширина" value={Math.round(d.widthScale ?? 100)} min={10} max={300} unit="%" editable onChange={v => s.updateNodeData(node.id, { widthScale: v })} />
+                <Slider label="Поворот" value={Math.round(d.rotation ?? 0)} min={-180} max={180} unit="°" editable onChange={v => s.updateNodeData(node.id, { rotation: v })} />
                 <Slider label="Z-индекс" value={Math.round(d.z ?? 0)} min={0} max={40} unit={d.z ? '' : ' (авто)'} onChange={v => s.updateNodeData(node.id, { z: v })} />
                 <Slider label="Длительность эффекта" value={d.duration ?? 0.6} min={0.1} max={3} step={0.1} unit="с" onChange={v => s.updateNodeData(node.id, { duration: v })} />
 
@@ -1462,17 +1459,76 @@ export function Inspector() {
 
 /* ------------------------------ console controls --------------------------- */
 
-function Slider({ label, value, min, max, step = 1, unit = '', onChange }: {
-  label: string; value: number; min: number; max: number; step?: number; unit?: string; onChange: (v: number) => void;
-})
-{
+function Slider({ label, value, min, max, step = 1, unit = '', onChange, editable = false }: {
+  label: string; value: number; min: number; max: number; step?: number; unit?: string;
+  onChange: (v: number) => void; editable?: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(String(value));
+  const ignoreBlur = useRef(false);
+
+  useEffect(() => {
+    if (!editing) setDraft(String(value));
+  }, [value, editing]);
+
+  const commit = () => {
+    if (ignoreBlur.current) {
+      ignoreBlur.current = false;
+      return;
+    }
+    const parsed = Number(draft.replace(',', '.'));
+    if (Number.isFinite(parsed)) {
+      const snapped = min + Math.round((Math.max(min, Math.min(max, parsed)) - min) / step) * step;
+      const decimals = String(step).split('.')[1]?.length ?? 0;
+      onChange(Number(snapped.toFixed(decimals)));
+    } else {
+      setDraft(String(value));
+    }
+    setEditing(false);
+  };
+
   return (
     <div className="w-full">
-      <div className="flex justify-between text-[10px] text-mute mb-1">
+      <div className="flex justify-between items-center text-[10px] text-mute mb-1 gap-2">
         <span>{label}</span>
-        <span className="text-paper font-bold">{value}{unit}</span>
+        {editable && editing ? (
+          <input
+            autoFocus
+            type="number"
+            className="input !w-[76px] !py-0.5 !px-1.5 !text-[10px] text-right tabular-nums"
+            min={min}
+            max={max}
+            step={step}
+            value={draft}
+            onChange={event => setDraft(event.target.value)}
+            onBlur={commit}
+            onKeyDown={event => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                event.currentTarget.blur();
+              } else if (event.key === 'Escape') {
+                event.preventDefault();
+                ignoreBlur.current = true;
+                setDraft(String(value));
+                setEditing(false);
+              }
+            }}
+          />
+        ) : editable ? (
+          <button
+            type="button"
+            className="rounded px-1.5 py-0.5 text-paper font-bold tabular-nums hover:bg-ink-700 hover:text-[var(--accent)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--accent)]"
+            onClick={() => { setDraft(String(value)); setEditing(true); }}
+            title="Нажмите, чтобы ввести значение числом"
+          >
+            {value}{unit}
+          </button>
+        ) : (
+          <span className="text-paper font-bold">{value}{unit}</span>
+        )}
       </div>
-      <input type="range" min={min} max={max} step={step} value={value} onChange={e => onChange(Number(e.target.value))} />
+      <input type="range" min={min} max={max} step={step} value={value}
+        onChange={e => onChange(Number(e.target.value))} />
     </div>
   );
 }
