@@ -1268,12 +1268,16 @@ export function Inspector() {
                 <div className="grid grid-cols-2 gap-2">
                   <Field label="X, %"><input className="input" type="number" step={0.5} min={-20} max={120} value={Math.round((d.x ?? 50) * 10) / 10} onChange={e => s.updateNodeData(node.id, { x: Number(e.target.value) })} /></Field>
                   <Field label="Y, %"><input className="input" type="number" step={0.5} min={-20} max={120} value={Math.round((d.y ?? 74) * 10) / 10} onChange={e => s.updateNodeData(node.id, { y: Number(e.target.value) })} /></Field>
-                  <Field label="Размер, %"><input className="input" type="number" min={10} max={300} value={Math.round(d.scale ?? 100)} onChange={e => s.updateNodeData(node.id, { scale: Number(e.target.value) })} /></Field>
+                  <Field label="Высота, %"><input className="input" type="number" min={10} max={300} value={Math.round(d.scale ?? 100)} onChange={e => s.updateNodeData(node.id, { scale: Number(e.target.value) })} /></Field>
+                  <Field label="Ширина, %"><input className="input" type="number" min={10} max={300} value={Math.round(d.widthScale ?? 100)} onChange={e => s.updateNodeData(node.id, { widthScale: Number(e.target.value) })} /></Field>
+                  <Field label="Поворот, °"><input className="input" type="number" min={-180} max={180} value={Math.round(d.rotation ?? 0)} onChange={e => s.updateNodeData(node.id, { rotation: Number(e.target.value) })} /></Field>
                   <Field label="Z-индекс"><input className="input" type="number" min={0} max={40} placeholder="авто" value={d.z ? Math.round(d.z) : ''} onChange={e => s.updateNodeData(node.id, { z: e.target.value === '' ? 0 : Number(e.target.value) })} /></Field>
                 </div>
                 <Slider label="Позиция X" value={Math.round(d.x ?? 50)} min={-20} max={120} unit="%" onChange={v => s.updateNodeData(node.id, { x: v })} />
                 <Slider label="Позиция Y (низ объекта)" value={Math.round(d.y ?? 74)} min={-20} max={120} unit="%" onChange={v => s.updateNodeData(node.id, { y: v })} />
-                <Slider label="Размер" value={Math.round(d.scale ?? 100)} min={10} max={300} unit="%" onChange={v => s.updateNodeData(node.id, { scale: v })} />
+                <Slider label="Высота" value={Math.round(d.scale ?? 100)} min={10} max={300} unit="%" onChange={v => s.updateNodeData(node.id, { scale: v })} />
+                <Slider label="Ширина" value={Math.round(d.widthScale ?? 100)} min={10} max={300} unit="%" onChange={v => s.updateNodeData(node.id, { widthScale: v })} />
+                <Slider label="Поворот" value={Math.round(d.rotation ?? 0)} min={-180} max={180} unit="°" onChange={v => s.updateNodeData(node.id, { rotation: v })} />
                 <Slider label="Z-индекс" value={Math.round(d.z ?? 0)} min={0} max={40} unit={d.z ? '' : ' (авто)'} onChange={v => s.updateNodeData(node.id, { z: v })} />
                 <Slider label="Длительность эффекта" value={d.duration ?? 0.6} min={0.1} max={3} step={0.1} unit="с" onChange={v => s.updateNodeData(node.id, { duration: v })} />
 
@@ -1281,7 +1285,7 @@ export function Inspector() {
                   <Eye size={13} /> Показать на сцене
                 </button>
                 <div className="text-[11px] text-mute leading-snug">
-                  Для текстовых и геометрических объектов повторяйте один и тот же ID в нодах показа, перемещения и скрытия. Размер и позицию можно настроить в предпросмотре.
+                  Ширина меняется независимо от высоты, 100% — исходная пропорция. Поворот задаётся в градусах. Положение и трансформацию также можно настроить в предпросмотре.
                 </div>
               </>
             )}
