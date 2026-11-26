@@ -15,6 +15,87 @@ interface DragState {
   ow: number;
   hpx: number;
   wpx: number;
+  rotation: number;
+}
+
+interface EditableRangeProps {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  unit: string;
+  onChange: (value: number) => void;
+}
+
+function EditableRange({ label, value, min, max, unit, onChange }: EditableRangeProps) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(String(Math.round(value)));
+  const ignoreBlur = useRef(false);
+
+  useEffect(() => {
+    if (!editing) setDraft(String(Math.round(value)));
+  }, [value, editing]);
+
+  const commit = () => {
+    if (ignoreBlur.current) {
+      ignoreBlur.current = false;
+      return;
+    }
+    const parsed = Number(draft);
+    if (Number.isFinite(parsed)) onChange(Math.max(min, Math.min(max, Math.round(parsed))));
+    else setDraft(String(Math.round(value)));
+    setEditing(false);
+  };
+
+  return (
+    <div className="min-w-0 space-y-1">
+      <div className="flex items-center justify-between gap-2 text-[11px]">
+        <span className="text-mute">{label}</span>
+        {editing ? (
+          <input
+            autoFocus
+            type="number"
+            className="input !w-[76px] !py-0.5 !px-1.5 text-right !text-[11px] tabular-nums"
+            min={min}
+            max={max}
+            step={1}
+            value={draft}
+            onChange={event => setDraft(event.target.value)}
+            onBlur={commit}
+            onKeyDown={event => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                event.currentTarget.blur();
+              } else if (event.key === 'Escape') {
+                event.preventDefault();
+                ignoreBlur.current = true;
+                setDraft(String(Math.round(value)));
+                setEditing(false);
+              }
+            }}
+          />
+        ) : (
+          <button
+            type="button"
+            className="rounded px-1.5 py-0.5 font-bold text-paper tabular-nums hover:bg-ink-700 hover:text-[var(--accent)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--accent)]"
+            onClick={() => { setDraft(String(Math.round(value))); setEditing(true); }}
+            title="Нажмите, чтобы ввести значение числом"
+          >
+            {Math.round(value)}{unit}
+          </button>
+        )}
+      </div>
+      <input
+        className="w-full accent-[var(--accent)]"
+        type="range"
+        min={min}
+        max={max}
+        step={1}
+        value={value}
+        onChange={event => onChange(Number(event.target.value))}
+      />
+    </div>
+  );
 }
 
 export function StagePreview() {
@@ -33,12 +114,21 @@ export function StagePreview() {
         const nx = drag.ox + ((e.clientX - drag.sx) / rect.width) * 100;
         const ny = drag.oy + ((e.clientY - drag.sy) / rect.height) * 100;
         useStore.getState().previewTransform(drag.key, { x: nx, y: ny });
-      } else if (drag.mode === 'resize-height') {
-        const factor = Math.max(0.15, (drag.hpx - (e.clientY - drag.sy)) / drag.hpx);
-        useStore.getState().previewTransform(drag.key, { scale: drag.os * factor });
       } else {
-        const factor = Math.max(0.15, (drag.wpx + (e.clientX - drag.sx)) / drag.wpx);
-        useStore.getState().previewTransform(drag.key, { widthScale: drag.ow * factor });
+        const dx = e.clientX - drag.sx;
+        const dy = e.clientY - drag.sy;
+        const angle = drag.rotation * Math.PI / 180;
+        if (drag.mode === 'resize-height') {
+          // Project pointer movement onto the entity's local vertical axis.
+          const localUp = -(dx * Math.sin(angle) + dy * Math.cos(angle));
+          const factor = Math.max(0.15, (drag.hpx + localUp) / drag.hpx);
+          useStore.getState().previewTransform(drag.key, { scale: drag.os * factor });
+        } else {
+          // Project pointer movement onto the entity's local horizontal axis.
+          const localRight = dx * Math.cos(angle) + dy * Math.sin(angle);
+          const factor = Math.max(0.15, (drag.wpx + localRight) / drag.wpx);
+          useStore.getState().previewTransform(drag.key, { widthScale: drag.ow * factor });
+        }
       }
     };
     const up = () => setDrag(null);
@@ -66,7 +156,6 @@ export function StagePreview() {
     const ent = preview.entities[key];
     const rect = boxRef.current?.getBoundingClientRect();
     const item = (mode === 'move' ? e.currentTarget : e.currentTarget.parentElement) as HTMLElement | null;
-    const itemRect = item?.getBoundingClientRect();
     if (!ent || !rect) return;
     setSel(key);
     setDrag({
@@ -74,7 +163,8 @@ export function StagePreview() {
       sx: e.clientX, sy: e.clientY,
       ox: ent.x, oy: ent.y, os: ent.scale, ow: ent.widthScale ?? 100,
       hpx: Math.max(24, (ent.scale / 100) * rect.height),
-      wpx: Math.max(24, itemRect?.width ?? 24),
+      wpx: Math.max(24, (item?.offsetWidth ?? 24) * ((ent.widthScale ?? 100) / 100)),
+      rotation: ent.rotation ?? 0,
     });
   };
 
@@ -118,56 +208,58 @@ export function StagePreview() {
           return (
             <div
               key={ent.key}
-              className="absolute flex items-end"
+              className="absolute flex h-full w-max min-w-max items-end pointer-events-none"
               style={{
                 left: `${ent.x}%`,
                 top: `${ent.y}%`,
-                height: `${ent.scale}%`,
-                width: 'max-content',
-                minWidth: 'max-content',
                 transform: 'translate(-50%, -100%)',
                 zIndex: ent.z,
-                cursor: isDrag && drag?.mode === 'move' ? 'grabbing' : 'grab',
               }}
-              onPointerDown={e => startDrag(e, ent.key, 'move')}
-              onWheel={e => {
-                e.stopPropagation();
-                useStore.getState().previewTransform(ent.key, { scale: ent.scale * (e.deltaY < 0 ? 1.06 : 0.94) });
-              }}
-              title="Перетащите, чтобы переместить · колесо — размер"
             >
               <div
-                className={`h-full relative ${isSel ? 'outline outline-2 outline-offset-4 rounded' : ''}`}
+                className={`relative h-full w-max min-w-max pointer-events-auto ${isSel ? 'outline outline-2 outline-offset-4 rounded' : ''}`}
                 style={{
-                  pointerEvents: 'none',
                   outlineColor: isSel ? 'var(--accent)' : undefined,
-                  transform: `rotate(${ent.rotation ?? 0}deg) scaleX(${(ent.widthScale ?? 100) / 100})`,
+                  transform: `rotate(${ent.rotation ?? 0}deg) scaleX(${(ent.widthScale ?? 100) / 100}) scaleY(${ent.scale / 100})`,
                   transformOrigin: 'bottom center',
+                  cursor: isDrag && drag?.mode === 'move' ? 'grabbing' : 'grab',
                 }}
+                onPointerDown={e => startDrag(e, ent.key, 'move')}
+                onWheel={e => {
+                  e.stopPropagation();
+                  useStore.getState().previewTransform(ent.key, { scale: ent.scale * (e.deltaY < 0 ? 1.06 : 0.94) });
+                }}
+                title="Перетащите, чтобы переместить · колесо — высота"
               >
-                <EntityView ent={ent} />
+                <div className="h-full pointer-events-none">
+                  <EntityView ent={ent} />
+                </div>
+
+                <div
+                  className="absolute -top-3 left-1/2 -translate-x-1/2 w-4 h-4 rounded border-2 border-ink-950 cursor-ns-resize pointer-events-auto transition-opacity"
+                  style={{ background: 'var(--accent)', opacity: isSel ? 1 : 0.3 }}
+                  onPointerDown={e => startDrag(e, ent.key, 'resize-height')}
+                  title="Тяните вдоль вертикальной оси спрайта, чтобы изменить высоту"
+                />
+
+                <div
+                  className="absolute right-[-7px] top-1/2 -translate-y-1/2 w-4 h-4 rounded border-2 border-ink-950 cursor-ew-resize pointer-events-auto transition-opacity"
+                  style={{ background: '#2ee6a8', opacity: isSel ? 1 : 0.3 }}
+                  onPointerDown={e => startDrag(e, ent.key, 'resize-width')}
+                  title="Тяните вдоль горизонтальной оси спрайта, чтобы изменить ширину"
+                />
               </div>
-
-              <div
-                className="absolute -top-3 left-1/2 -translate-x-1/2 w-4 h-4 rounded border-2 border-ink-950 cursor-ns-resize transition-opacity"
-                style={{ background: 'var(--accent)', opacity: isSel ? 1 : 0.3 }}
-                onPointerDown={e => startDrag(e, ent.key, 'resize-height')}
-                title="Тяните вверх/вниз, чтобы изменить высоту"
-              />
-
-              <div
-                className="absolute right-[-7px] top-1/2 -translate-y-1/2 w-4 h-4 rounded border-2 border-ink-950 cursor-ew-resize transition-opacity"
-                style={{ background: '#2ee6a8', opacity: isSel ? 1 : 0.3 }}
-                onPointerDown={e => startDrag(e, ent.key, 'resize-width')}
-                title="Тяните влево/вправо, чтобы изменить ширину"
-              />
-
               {isSel && (
                 <div
-                  className="absolute -top-9 left-1/2 -translate-x-1/2 chip !text-[10px] whitespace-nowrap font-mono"
-                  style={{ borderColor: 'var(--accent)', color: 'var(--accent)', background: '#0b0e15dd' }}
+                  className="absolute left-1/2 -translate-x-1/2 chip !text-[10px] whitespace-nowrap font-mono pointer-events-none"
+                  style={{
+                    top: `calc(100% - ${ent.scale}% - 34px)`,
+                    borderColor: 'var(--accent)',
+                    color: 'var(--accent)',
+                    background: '#0b0e15dd',
+                  }}
                 >
-                  x {Math.round(ent.x)} · y {Math.round(ent.y)} · ш {Math.round(ent.widthScale ?? 100)}% · в {Math.round(ent.scale)}% · {Math.round(ent.rotation ?? 0)}°
+                  {ent.src.slice(0, 10)}
                 </div>
               )}
             </div>
@@ -187,35 +279,23 @@ export function StagePreview() {
 
         {selEnt && (
           <div
-            className="absolute top-3 right-3 z-30 w-60 panel border border-ink-600 rounded-xl p-3 shadow-2xl space-y-3"
+            className="absolute top-3 right-3 z-30 w-72 max-h-[calc(100%-24px)] overflow-y-auto panel border border-ink-600 rounded-xl p-3 shadow-2xl space-y-2.5"
             onPointerDown={e => e.stopPropagation()}
             onClick={e => e.stopPropagation()}
           >
-            <div className="text-[10px] uppercase tracking-wider text-mute font-bold">Параметры спрайта</div>
-            <label className="block space-y-1">
-              <div className="flex items-center justify-between text-[11px]">
-                <span>Ширина</span><b className="text-paper">{Math.round(selEnt.widthScale ?? 100)}%</b>
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-[10px] uppercase tracking-wider text-mute font-bold">Параметры спрайта</div>
+              <span className="text-[9px] text-mute font-mono">{selEnt.src.slice(0, 8)}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+              <EditableRange label="Позиция X" value={selEnt.x} min={-20} max={120} unit="%" onChange={x => s.previewTransform(selEnt.key, { x })} />
+              <EditableRange label="Позиция Y" value={selEnt.y} min={-20} max={120} unit="%" onChange={y => s.previewTransform(selEnt.key, { y })} />
+              <EditableRange label="Ширина" value={selEnt.widthScale ?? 100} min={10} max={300} unit="%" onChange={widthScale => s.previewTransform(selEnt.key, { widthScale })} />
+              <EditableRange label="Высота" value={selEnt.scale} min={10} max={300} unit="%" onChange={scale => s.previewTransform(selEnt.key, { scale })} />
+              <div className="col-span-2">
+                <EditableRange label="Поворот" value={selEnt.rotation ?? 0} min={-180} max={180} unit="°" onChange={rotation => s.previewTransform(selEnt.key, { rotation })} />
               </div>
-              <input className="w-full accent-[var(--accent)]" type="range" min={10} max={300} step={1}
-                value={selEnt.widthScale ?? 100}
-                onChange={e => s.previewTransform(selEnt.key, { widthScale: Number(e.target.value) })} />
-            </label>
-            <label className="block space-y-1">
-              <div className="flex items-center justify-between text-[11px]">
-                <span>Высота</span><b className="text-paper">{Math.round(selEnt.scale)}%</b>
-              </div>
-              <input className="w-full accent-[var(--accent)]" type="range" min={10} max={300} step={1}
-                value={selEnt.scale}
-                onChange={e => s.previewTransform(selEnt.key, { scale: Number(e.target.value) })} />
-            </label>
-            <label className="block space-y-1">
-              <div className="flex items-center justify-between text-[11px]">
-                <span>Поворот</span><b className="text-paper">{Math.round(selEnt.rotation ?? 0)}°</b>
-              </div>
-              <input className="w-full accent-[var(--accent)]" type="range" min={-180} max={180} step={1}
-                value={selEnt.rotation ?? 0}
-                onChange={e => s.previewTransform(selEnt.key, { rotation: Number(e.target.value) })} />
-            </label>
+            </div>
             <button className="btn w-full justify-center !text-[11px]"
               onClick={() => s.previewTransform(selEnt.key, { widthScale: 100, scale: 100, rotation: 0 })}>
               Сбросить трансформацию
