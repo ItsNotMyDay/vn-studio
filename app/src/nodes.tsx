@@ -123,7 +123,7 @@ function DialogueNode({ id, data, selected }: any) {
         <span className="chip !py-0 !px-1.5 !text-[9px] border-ink-600 text-mute shrink-0">{replies.length} {replies.length === 1 ? 'реплика' : replies.length < 5 ? 'реплики' : 'реплик'}</span>
       </div>
       <div className="space-y-1.5">
-        {shown.map((reply, index) => {
+        {shown.map(reply => {
           const character = characters.find(item => item.id === reply.characterId);
           const color = character?.color ?? '#39d5ff';
           return (
