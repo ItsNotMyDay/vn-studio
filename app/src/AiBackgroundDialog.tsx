@@ -162,7 +162,8 @@ export function AiBackgroundDialog({ open, onClose }: { open: boolean; onClose: 
   const busy = phase === 'generating';
 
   return (
-    <FloatingWindow id="ai-background" title="AI-фон" open={open} onClose={onClose} width={880} height={720}>
+    <>
+      <FloatingWindow id="ai-background" title="AI-фон" open={open} onClose={onClose} width={880} height={720}>
       <div className="panel border rounded-2xl w-[min(880px,95vw)] max-h-[92vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
         <div data-floating-handle className="sticky top-0 z-10 flex items-center gap-2 px-4 py-3 border-b border-ink-700 panel cursor-move">
           <ImageIcon size={15} style={{ color: 'var(--accent)' }} />
@@ -309,6 +310,6 @@ export function AiBackgroundDialog({ open, onClose }: { open: boolean; onClose: 
           void generate(seed, mode);
         }}
       />
-    </div>
+    </>
   );
 }
