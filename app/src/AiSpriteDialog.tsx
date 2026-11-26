@@ -317,6 +317,7 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
       </FloatingWindow>
       <QuantizationDialog
         open={quantizationOpen}
+        windowId="quantization-character-sprite"
         modelName={cfg.modelId}
         onClose={() => { setQuantizationOpen(false); setPendingLoadAction(null); }}
         onSelect={mode => {
