@@ -15,6 +15,7 @@ import { LlmChat } from './LlmChat';
 import { Launcher } from './Launcher';
 import { CompileDialog } from './CompileDialog';
 import { useStore, KIND_META, type NodeKind } from './store';
+import { listen } from '@tauri-apps/api/event';
 
 
 const CHROME_CSS = `
@@ -233,10 +234,7 @@ function Shell() {
     const listenForClose = async () => {
       if (!(window as any).__TAURI_INTERNALS__) return;
       try {
-        const { getCurrentWindow } = await import('@tauri-apps/api/window');
-        const current = getCurrentWindow();
-        const cleanup = await current.onCloseRequested(event => {
-          event.preventDefault();
+        const cleanup = await listen('app-close-requested', () => {
           setCloseState(state => state === 'shutting' ? state : 'confirm');
         });
         if (alive) unlisten = cleanup;
@@ -260,14 +258,17 @@ function Shell() {
 
     setCloseState('shutting');
     activateMainWindow();
-    const endpoint = (useStore.getState().director.aiEndpoint || 'http://127.0.0.1:8765').replace(/\\/+$/, '');
+    const endpoint = (useStore.getState().director.aiEndpoint || 'http://127.0.0.1:8765').replace(/\/+$/, '');
     try {
       const controller = new AbortController();
       const timeout = window.setTimeout(() => controller.abort(), 2500);
-      await fetch(endpoint + '/shutdown', { method: 'POST', signal: controller.signal });
-      window.clearTimeout(timeout);
+      try {
+        await fetch(endpoint + '/shutdown', { method: 'POST', signal: controller.signal });
+      } finally {
+        window.clearTimeout(timeout);
+      }
     } catch {
-      // The AI server may be remote or already stopped; close the editor anyway.
+      // The AI server may already be stopped or hosted on another computer.
     }
 
     try {
