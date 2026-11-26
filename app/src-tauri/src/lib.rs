@@ -626,11 +626,11 @@ fn local_server_health(port: u16) -> bool {
     {
         return false;
     }
-    let mut response = [0u8; 256];
-    let Ok(read) = stream.read(&mut response) else {
+    let mut response = Vec::new();
+    if stream.read_to_end(&mut response).is_err() {
         return false;
-    };
-    let response_text = String::from_utf8_lossy(&response[..read]);
+    }
+    let response_text = String::from_utf8_lossy(&response);
     let Some((headers, body)) = response_text.split_once("\r\n\r\n") else {
         return false;
     };
