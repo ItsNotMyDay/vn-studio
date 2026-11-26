@@ -5,13 +5,15 @@ import { Backdrop, EntityView } from './stage';
 
 interface DragState {
   key: string;
-  mode: 'move' | 'resize';
+  mode: 'move' | 'resize-height' | 'resize-width';
   sx: number;
   sy: number;
   ox: number;
   oy: number;
   os: number;
+  ow: number;
   hpx: number;
+  wpx: number;
 }
 
 export function StagePreview() {
@@ -38,9 +40,12 @@ export function StagePreview() {
         const nx = drag.ox + ((e.clientX - drag.sx) / rect.width) * 100;
         const ny = drag.oy + ((e.clientY - drag.sy) / rect.height) * 100;
         useStore.getState().previewTransform(drag.key, { x: nx, y: ny });
-      } else {
+      } else if (drag.mode === 'resize-height') {
         const factor = Math.max(0.15, (drag.hpx - (e.clientY - drag.sy)) / drag.hpx);
         useStore.getState().previewTransform(drag.key, { scale: drag.os * factor });
+      } else {
+        const factor = Math.max(0.15, (drag.wpx + (e.clientX - drag.sx)) / drag.wpx);
+        useStore.getState().previewTransform(drag.key, { widthScale: drag.ow * factor });
       }
     };
     const up = () => setDrag(null);
@@ -62,18 +67,21 @@ export function StagePreview() {
   const node = s.scene()?.nodes.find(n => n.id === preview.nodeId);
   const selEnt = sel ? preview.entities[sel] : undefined;
 
-  const startDrag = (e: React.PointerEvent, key: string, mode: 'move' | 'resize') => {
+  const startDrag = (e: React.PointerEvent, key: string, mode: DragState['mode']) => {
     e.stopPropagation();
     e.preventDefault();
     const ent = preview.entities[key];
     const rect = boxRef.current?.getBoundingClientRect();
+    const item = (mode === 'move' ? e.currentTarget : e.currentTarget.parentElement) as HTMLElement | null;
+    const itemRect = item?.getBoundingClientRect();
     if (!ent || !rect) return;
     setSel(key);
     setDrag({
       key, mode,
       sx: e.clientX, sy: e.clientY,
-      ox: ent.x, oy: ent.y, os: ent.scale,
+      ox: ent.x, oy: ent.y, os: ent.scale, ow: ent.widthScale ?? 100,
       hpx: Math.max(24, (ent.scale / 100) * rect.height),
+      wpx: Math.max(24, itemRect?.width ?? 24),
     });
   };
 
@@ -136,7 +144,12 @@ export function StagePreview() {
             >
               <div
                 className={`h-full relative ${isSel ? 'outline outline-2 outline-offset-4 rounded' : ''}`}
-                style={{ pointerEvents: 'none', outlineColor: isSel ? 'var(--accent)' : undefined }}
+                style={{
+                  pointerEvents: 'none',
+                  outlineColor: isSel ? 'var(--accent)' : undefined,
+                  transform: `rotate(${ent.rotation ?? 0}deg) scaleX(${(ent.widthScale ?? 100) / 100})`,
+                  transformOrigin: 'bottom center',
+                }}
               >
                 <EntityView ent={ent} />
               </div>
@@ -144,8 +157,15 @@ export function StagePreview() {
               <div
                 className="absolute -top-3 left-1/2 -translate-x-1/2 w-4 h-4 rounded border-2 border-ink-950 cursor-ns-resize transition-opacity"
                 style={{ background: 'var(--accent)', opacity: isSel ? 1 : 0.3 }}
-                onPointerDown={e => startDrag(e, ent.key, 'resize')}
-                title="Тяните вверх/вниз, чтобы изменить размер"
+                onPointerDown={e => startDrag(e, ent.key, 'resize-height')}
+                title="Тяните вверх/вниз, чтобы изменить высоту"
+              />
+
+              <div
+                className="absolute right-[-7px] top-1/2 -translate-y-1/2 w-4 h-4 rounded border-2 border-ink-950 cursor-ew-resize transition-opacity"
+                style={{ background: '#2ee6a8', opacity: isSel ? 1 : 0.3 }}
+                onPointerDown={e => startDrag(e, ent.key, 'resize-width')}
+                title="Тяните влево/вправо, чтобы изменить ширину"
               />
 
               {isSel && (
@@ -153,7 +173,7 @@ export function StagePreview() {
                   className="absolute -top-9 left-1/2 -translate-x-1/2 chip !text-[10px] whitespace-nowrap font-mono"
                   style={{ borderColor: 'var(--accent)', color: 'var(--accent)', background: '#0b0e15dd' }}
                 >
-                  x {Math.round(ent.x)} · y {Math.round(ent.y)} · {Math.round(ent.scale)}%
+                  x {Math.round(ent.x)} · y {Math.round(ent.y)} · ш {Math.round(ent.widthScale ?? 100)}% · в {Math.round(ent.scale)}% · {Math.round(ent.rotation ?? 0)}°
                 </div>
               )}
             </div>
@@ -169,6 +189,44 @@ export function StagePreview() {
               style={{ left: `${selEnt.x}%`, top: `${selEnt.y}%`, transform: 'translate(-50%, -50%)', background: 'var(--accent)', boxShadow: '0 0 10px var(--accent)' }}
             />
           </>
+        )}
+
+        {selEnt && (
+          <div
+            className="absolute top-3 right-3 z-30 w-60 panel border border-ink-600 rounded-xl p-3 shadow-2xl space-y-3"
+            onPointerDown={e => e.stopPropagation()}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="text-[10px] uppercase tracking-wider text-mute font-bold">Параметры спрайта</div>
+            <label className="block space-y-1">
+              <div className="flex items-center justify-between text-[11px]">
+                <span>Ширина</span><b className="text-paper">{Math.round(selEnt.widthScale ?? 100)}%</b>
+              </div>
+              <input className="w-full accent-[var(--accent)]" type="range" min={10} max={300} step={1}
+                value={selEnt.widthScale ?? 100}
+                onChange={e => s.previewTransform(selEnt.key, { widthScale: Number(e.target.value) })} />
+            </label>
+            <label className="block space-y-1">
+              <div className="flex items-center justify-between text-[11px]">
+                <span>Высота</span><b className="text-paper">{Math.round(selEnt.scale)}%</b>
+              </div>
+              <input className="w-full accent-[var(--accent)]" type="range" min={10} max={300} step={1}
+                value={selEnt.scale}
+                onChange={e => s.previewTransform(selEnt.key, { scale: Number(e.target.value) })} />
+            </label>
+            <label className="block space-y-1">
+              <div className="flex items-center justify-between text-[11px]">
+                <span>Поворот</span><b className="text-paper">{Math.round(selEnt.rotation ?? 0)}°</b>
+              </div>
+              <input className="w-full accent-[var(--accent)]" type="range" min={-180} max={180} step={1}
+                value={selEnt.rotation ?? 0}
+                onChange={e => s.previewTransform(selEnt.key, { rotation: Number(e.target.value) })} />
+            </label>
+            <button className="btn w-full justify-center !text-[11px]"
+              onClick={() => s.previewTransform(selEnt.key, { widthScale: 100, scale: 100, rotation: 0 })}>
+              Сбросить трансформацию
+            </button>
+          </div>
         )}
 
         <div className="absolute bottom-2 left-3 flex flex-wrap gap-1.5 pointer-events-none">
@@ -187,7 +245,7 @@ export function StagePreview() {
 
       <div className="h-8 shrink-0 flex items-center gap-3 px-3 border-t border-ink-700 panel text-[11px] text-mute">
         <span>ЛКМ по сущности — перетащить</span>
-        <span>колесо мыши / ручка сверху — размер</span>
+        <span>колесо / верхняя ручка — высота · правая ручка — ширина</span>
         <span>Esc — выйти из предпросмотра</span>
         <div className="flex-1" />
         {selEnt && (

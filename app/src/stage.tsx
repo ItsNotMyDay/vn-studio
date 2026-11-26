@@ -281,7 +281,16 @@ export function Stage({ full = false }: { full?: boolean }) {
                 animationDirection: ent.hiding ? 'reverse' : 'normal',
               }}
             >
-              <EntityView ent={ent} />
+              <div
+                className="h-full"
+                style={{
+                  transform: `rotate(${ent.rotation ?? 0}deg) scaleX(${(ent.widthScale ?? 100) / 100})`,
+                  transformOrigin: 'bottom center',
+                  transition: ent.moveEase && !ent.hiding ? `transform ${ent.duration}s ${moveCss(ent.moveEase)}` : undefined,
+                }}
+              >
+                <EntityView ent={ent} />
+              </div>
             </div>
           </div>
         ))}

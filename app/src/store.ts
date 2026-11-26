@@ -77,7 +77,7 @@ export interface Project {
 }
 export interface StageEntity {
   key: string; kind: EntityKind; refId: string; src: string;
-  x: number; y: number; scale: number; expression: string;
+  x: number; y: number; scale: number; widthScale?: number; rotation?: number; expression: string;
   effect: EntityEffect; moveEase?: string; duration: number; z: number; hiding?: boolean;
   spriteType?: 'asset' | 'text' | 'geometry'; text?: string; backgroundColor?: string; textColor?: string;
   geometryType?: 'line' | 'rectangle' | 'triangle' | 'circle'; strokeColor?: string; fillColor?: string; opacity?: number;
@@ -560,7 +560,7 @@ interface Store {
 
   openPreview: (nodeId: string) => void;
   closePreview: () => void;
-  previewTransform: (key: string, patch: { x?: number; y?: number; scale?: number }) => void;
+  previewTransform: (key: string, patch: { x?: number; y?: number; scale?: number; widthScale?: number; rotation?: number }) => void;
 
   buildRichContext: (nodeId: string) => Promise<RichContext>;
   indexCurrentChapter: () => Promise<void>;
@@ -662,6 +662,8 @@ export const useStore = create<Store>((set, get) => {
       x: num(d.x, prev?.x ?? 50),
       y: num(d.y, prev?.y ?? 74),
       scale: num(d.scale, prev?.scale ?? 100),
+      widthScale: num(d.widthScale, prev?.widthScale ?? 100),
+      rotation: num(d.rotation, prev?.rotation ?? 0),
       expression: d.expression ?? prev?.expression ?? 'neutral',
       effect: fx,
       moveEase: d.action === 'move' ? (d.fxMove ?? 'ease-out') : undefined,
@@ -1421,6 +1423,8 @@ export const useStore = create<Store>((set, get) => {
       if (typeof patch.x === 'number') clean.x = Math.max(-20, Math.min(120, Math.round(patch.x * 10) / 10));
       if (typeof patch.y === 'number') clean.y = Math.max(-20, Math.min(120, Math.round(patch.y * 10) / 10));
       if (typeof patch.scale === 'number') clean.scale = Math.max(10, Math.min(300, Math.round(patch.scale)));
+      if (typeof patch.widthScale === 'number') clean.widthScale = Math.max(10, Math.min(300, Math.round(patch.widthScale)));
+      if (typeof patch.rotation === 'number') clean.rotation = Math.max(-180, Math.min(180, Math.round(patch.rotation)));
       mutateScene(sc => ({ ...sc, nodes: sc.nodes.map(n => n.id === ent.src ? { ...n, data: { ...n.data, ...clean } } : n) }));
       set({ preview: simulate(pv.nodeId) });
     },
