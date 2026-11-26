@@ -1,5 +1,6 @@
 import base64
 import inspect
+import ipaddress
 import io
 import json
 import os
@@ -9,6 +10,7 @@ import threading
 import uuid
 import re
 import time
+import signal
 import urllib.error
 import urllib.request
 from typing import Optional, Literal
@@ -25,7 +27,7 @@ if os.name != "nt":
     os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -1666,6 +1668,26 @@ def audio_job_file(job_id: str):
             raise HTTPException(409, "audio generation is not finished")
         raise HTTPException(404, "generated audio file not found")
     return FileResponse(str(path), media_type="audio/wav", filename=path.name)
+
+
+@app.post("/shutdown")
+def shutdown_server(request: Request):
+    # Only the local machine may stop its AI server. A client using a shared
+    # network AI server must never be able to shut that remote process down.
+    client_host = request.client.host if request.client else ""
+    try:
+        is_local = ipaddress.ip_address(client_host).is_loopback
+    except ValueError:
+        is_local = client_host.lower() == "localhost"
+    if not is_local:
+        raise HTTPException(403, "AI server shutdown is only allowed from localhost")
+
+    def terminate_after_response():
+        time.sleep(0.35)
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    threading.Thread(target=terminate_after_response, daemon=True).start()
+    return {"ok": True, "message": "AI server is shutting down"}
 
 
 @app.on_event("shutdown")

@@ -1,14 +1,17 @@
 import { Cpu, X, Zap } from 'lucide-react';
+import { FloatingWindow } from './FloatingWindow';
 import type { LocalQuantizationMode } from './ai';
 
 export function QuantizationDialog({
   open,
   modelName,
+  windowId = 'model-quantization',
   onSelect,
   onClose,
 }: {
   open: boolean;
   modelName?: string;
+  windowId?: string;
   onSelect: (mode: LocalQuantizationMode) => void;
   onClose: () => void;
 }) {
@@ -36,9 +39,9 @@ export function QuantizationDialog({
   ];
 
   return (
-    <div className="fixed inset-0 z-[160] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4" onClick={onClose}>
+    <FloatingWindow id={windowId} title="Режим загрузки модели" open={open} onClose={onClose} width={460} height={420}>
       <div className="panel border border-ink-600 rounded-2xl w-[min(460px,96vw)] p-4 shadow-2xl space-y-3" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center gap-2">
+        <div data-floating-handle className="flex items-center gap-2 cursor-move">
           <Cpu size={17} style={{ color: 'var(--accent)' }} />
           <div className="min-w-0 flex-1">
             <div className="font-bold text-[13px]">Режим загрузки модели</div>
@@ -65,6 +68,6 @@ export function QuantizationDialog({
         </div>
         <div className="text-[9px] text-mute">Уже квантованные файлы не перекодируются повторно. Для некоторых архитектур INT4 недоступен; сервер сообщит об этом до завершения загрузки.</div>
       </div>
-    </div>
+    </FloatingWindow>
   );
 }

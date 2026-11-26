@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { X, MousePointer2, LocateFixed, Move } from 'lucide-react';
 import { useStore, KIND_META, type NodeKind } from './store';
 import { Backdrop, EntityView } from './stage';
+import { FloatingWindow } from './FloatingWindow';
 
 interface DragState {
   key: string;
@@ -22,14 +23,6 @@ export function StagePreview() {
   const boxRef = useRef<HTMLDivElement>(null);
   const [sel, setSel] = useState<string | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
-
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') useStore.getState().closePreview();
-    };
-    window.addEventListener('keydown', h);
-    return () => window.removeEventListener('keydown', h);
-  }, []);
 
   useEffect(() => {
     if (!drag) return;
@@ -86,8 +79,9 @@ export function StagePreview() {
   };
 
   return (
-    <div className="absolute inset-0 z-40 bg-ink-950 flex flex-col">
-      <div className="h-10 shrink-0 flex items-center gap-2 px-3 border-b border-ink-700 panel">
+    <FloatingWindow id="entity-stage-preview" title="Предпросмотр сцены" open={!!preview} onClose={s.closePreview} width={920} height={680}>
+      <div className="panel border border-ink-600 rounded-xl overflow-hidden flex flex-col w-full h-[min(82vh,760px)]">
+      <div data-floating-handle className="h-10 shrink-0 flex items-center gap-2 px-3 border-b border-ink-700 panel cursor-move">
         <MousePointer2 size={14} style={{ color: 'var(--accent)' }} />
         <span className="font-display font-bold text-[12px] uppercase tracking-wider">Предпросмотр сцены</span>
         <span className="chip border-ink-600 text-mute !text-[10px]">
@@ -254,6 +248,7 @@ export function StagePreview() {
           </span>
         )}
       </div>
-    </div>
+      </div>
+    </FloatingWindow>
   );
 }

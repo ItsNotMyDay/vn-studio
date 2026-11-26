@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { FloatingWindow } from './FloatingWindow';
 import { Loader2, Play, Save, Sparkles, X } from 'lucide-react';
 import { renderProceduralEffect, SOUND_EFFECT_PRESETS, type EffectPattern, type ProceduralEffectOptions, type SoundPreset } from './audio';
 import { useStore } from './store';
@@ -124,15 +125,12 @@ export function SoundEffectBuilder({ open, onClose }: { open: boolean; onClose: 
   );
 
   return (
-    <div
-      className="fixed inset-0 z-[95] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4"
-      onClick={() => !busy && onClose()}
-    >
+    <FloatingWindow id="sound-effect-builder" title="Конструктор звуков" open={open} onClose={onClose} width={760} height={720}>
       <div
         className="panel border border-ink-600 rounded-2xl w-[min(760px,96vw)] max-h-[92vh] overflow-y-auto shadow-2xl"
         onClick={event => event.stopPropagation()}
       >
-        <div className="sticky top-0 z-10 flex items-center gap-2 px-4 py-3 border-b border-ink-700 panel">
+        <div data-floating-handle className="sticky top-0 z-10 flex items-center gap-2 px-4 py-3 border-b border-ink-700 panel cursor-move">
           <Sparkles size={16} style={{ color: 'var(--accent)' }} />
           <span className="font-display font-bold text-[13px] uppercase tracking-widest">Конструктор звуков</span>
           <span className="chip !text-[10px]">локальный синтез</span>
@@ -226,6 +224,6 @@ export function SoundEffectBuilder({ open, onClose }: { open: boolean; onClose: 
           </p>
         </div>
       </div>
-    </div>
+    </FloatingWindow>
   );
 }

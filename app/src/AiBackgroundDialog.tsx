@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { FloatingWindow } from './FloatingWindow';
 import { Image as ImageIcon, X, RefreshCw, Dice5, Square, Check, Loader2, Server, Wand2 } from 'lucide-react';
 import { useStore } from './store';
 import {
@@ -161,9 +162,10 @@ export function AiBackgroundDialog({ open, onClose }: { open: boolean; onClose: 
   const busy = phase === 'generating';
 
   return (
-    <div className="fixed inset-0 z-[72] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={() => !busy && onClose()}>
+    <>
+      <FloatingWindow id="ai-background" title="AI-фон" open={open} onClose={onClose} width={880} height={720}>
       <div className="panel border rounded-2xl w-[min(880px,95vw)] max-h-[92vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
-        <div className="sticky top-0 z-10 flex items-center gap-2 px-4 py-3 border-b border-ink-700 panel">
+        <div data-floating-handle className="sticky top-0 z-10 flex items-center gap-2 px-4 py-3 border-b border-ink-700 panel cursor-move">
           <ImageIcon size={15} style={{ color: 'var(--accent)' }} />
           <span className="font-display font-bold text-[13px] uppercase tracking-widest">AI-фон</span>
           <div className="flex-1" />
@@ -296,8 +298,10 @@ export function AiBackgroundDialog({ open, onClose }: { open: boolean; onClose: 
           </div>
         </div>
       </div>
+      </FloatingWindow>
       <QuantizationDialog
         open={quantizationOpen}
+        windowId="quantization-background"
         modelName={cfg.modelId}
         onClose={() => { setQuantizationOpen(false); setPendingSeed(undefined); }}
         onSelect={mode => {
@@ -307,6 +311,6 @@ export function AiBackgroundDialog({ open, onClose }: { open: boolean; onClose: 
           void generate(seed, mode);
         }}
       />
-    </div>
+    </>
   );
 }

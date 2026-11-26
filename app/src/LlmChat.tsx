@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { FloatingWindow } from './FloatingWindow';
 import { MessageSquare, Send, Loader2, X, Server, Trash2, RefreshCw, Square, Database, BookOpen, Wrench, Check, Ban, Undo2 } from 'lucide-react';
 import { useStore } from './store';
 import { aiHealth, llmHealth, llmLoadJob, llmChat, aiCancelJob, embeddingsSearch, embeddingsIndex, loadAiSettings, openAiListModels, type AiSettings, type LlmMessage, type RichContext } from './ai';
@@ -294,8 +295,9 @@ export function LlmChat() {
   }
 
   return (
-    <div className="fixed bottom-4 right-4 z-[60] w-[460px] h-[600px] flex flex-col panel border rounded-2xl shadow-2xl text-left">
-      <div className="px-3 py-2 border-b border-ink-700 space-y-1 text-left">
+    <FloatingWindow id="ai-consultant" title="AI-консультант" open={isOpen} onClose={() => setIsOpen(false)} width={460} height={600}>
+      <div className="w-full h-[min(600px,80vh)] flex flex-col panel border border-ink-600 rounded-xl shadow-2xl text-left">
+      <div data-floating-handle className="px-3 py-2 border-b border-ink-700 space-y-1 text-left cursor-move">
         <div className="flex items-center gap-2">
           <MessageSquare size={15} style={{ color: 'var(--accent)' }} />
           <span className="font-display font-bold text-[12px] uppercase tracking-wider">AI-Консультант</span>
@@ -430,10 +432,12 @@ export function LlmChat() {
       </div>
       <QuantizationDialog
         open={quantizationOpen}
+        windowId="quantization-consultant-llm"
         modelName={modelName(aiCfg.llmPath)}
         onClose={() => setQuantizationOpen(false)}
         onSelect={mode => { setQuantizationOpen(false); void loadLlm(mode); }}
       />
-    </div>
+      </div>
+    </FloatingWindow>
   );
 }

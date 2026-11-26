@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Play, Square, Undo2, Redo2, Save, Download, FileText, Volume2, VolumeX, Plus, Trash2,
-  Search, GripVertical, Clapperboard, AlertTriangle, PanelLeft, PanelRight, RotateCcw, Shuffle,
+  Search, GripVertical, Clapperboard, AlertTriangle, PanelLeft, RotateCcw, Shuffle,
   MessageSquare, GitBranch, Sigma, Image, Music, AudioLines, StopCircle, X, Settings, Upload, Sparkles,
   RefreshCw, Loader2, Server, Database, Eye, UserRound, Package, FolderOpen, KeyRound,
   Cpu, ScanSearch, CheckCircle2, SlidersHorizontal
@@ -15,7 +15,7 @@ import { characterVariableAlias, getVariableAutocomplete, type VariableAutocompl
 import { BG_SWATCH } from './nodes';
 import { audioEnsure, audioPad, audioFile, effectPlay } from './audio';
 import { useAssetURL, getAssetURL, getBlob, putBlob, revokeAssetURL } from './assets';
-import { launchPlayer, post } from './bus';
+import { post } from './bus';
 import { AiSpriteDialog } from './AiSpriteDialog';
 import { AiSpriteAssetDialog } from './AiSpriteAssetDialog';
 import { AiBackgroundDialog } from './AiBackgroundDialog';
@@ -23,6 +23,8 @@ import { AiAudioDialog } from './AiAudioDialog';
 import { QuantizationDialog } from './QuantizationDialog';
 import { AudioEditor } from './AudioEditor';
 import { SoundEffectBuilder } from './SoundEffectBuilder';
+import { FloatingWindow } from './FloatingWindow';
+import { readProject } from './projects';
 import {
   loadAiSettings, saveAiSettings, aiHealth, llmHealth, embeddingsHealth, embeddingsClear, aiListModels,
   aiLoadJob, llmLoadJob, aiUnloadModel, llmUnload, aiCancelJob,
@@ -151,9 +153,9 @@ function TrackAudioEditorModal({ track, onClose }: { track: Track; onClose: () =
   };
 
   return (
-    <div className="fixed inset-0 z-[96] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="panel border border-ink-600 rounded-2xl w-[min(920px,96vw)] max-h-[92vh] overflow-y-auto shadow-2xl" onClick={event => event.stopPropagation()}>
-        <div className="sticky top-0 z-10 flex items-center gap-2 px-4 py-3 border-b border-ink-700 panel">
+    <FloatingWindow id={`audio-editor-${track.id}`} title={`Аудиоредактор · ${track.name}`} open onClose={onClose} width={920} height={720}>
+      <div className="panel border border-ink-600 rounded-2xl w-full max-h-[86vh] overflow-y-auto shadow-2xl">
+        <div data-floating-handle className="sticky top-0 z-10 flex items-center gap-2 px-4 py-3 border-b border-ink-700 panel cursor-move">
           <SlidersHorizontal size={15} style={{ color: 'var(--accent)' }} />
           <span className="font-display font-bold text-[12px] uppercase tracking-wider">Редактирование аудиоассета</span>
           <span className="text-[11px] text-mute truncate">{track.name}</span>
@@ -172,7 +174,7 @@ function TrackAudioEditorModal({ track, onClose }: { track: Track; onClose: () =
           {saving && <div className="text-[10px] text-mute">Сохраняем изменённый файл в ассеты…</div>}
         </div>
       </div>
-    </div>
+    </FloatingWindow>
   );
 }
 
@@ -289,9 +291,6 @@ export function Toolbar() {
         <Database size={14} /><span className="hidden xl:inline">Индекс главы</span>
       </button>
       <button className="btn" onClick={s.save} title="Сохранить (Ctrl+S)"><Save size={14} /><span className="hidden xl:inline">Сохранить</span></button>
-      <button className="btn btn-primary" onClick={() => s.setCompileOpen(true)} title="Компиляция игры для Windows / Linux / Android">
-        <Package size={14} /> Компилировать
-      </button>
       <button className="btn" onClick={s.exportScript} title="Экспорт сценария в текст"><FileText size={14} /><span className="hidden xl:inline">Сценарий</span></button>
       <button
         className="btn"
@@ -305,9 +304,11 @@ export function Toolbar() {
         {s.muted ? <VolumeX size={14} className="text-danger" /> : <Volume2 size={14} className="text-lime" />}
       </button>
       {s.player.running
-        ? <button className="btn btn-danger" onClick={() => { s.stop(); post({ type: 'stop' }); }}><Square size={14} /> Стоп</button>
-        : <button className="btn btn-primary" onClick={() => launchPlayer(s.currentSceneId)} title="Запустить демо в отдельном окне"><Play size={14} /> Play</button>}
-      <button className="btn" onClick={() => s.setRightOpen(!s.rightOpen)} title="Правая панель"><PanelRight size={14} /></button>
+        ? <button className="btn btn-danger" onClick={() => { s.stop(); post({ type: 'stop' }); }}><Square size={14} /> Стоп ноды</button>
+        : <button className="btn btn-primary" onClick={() => s.setCompiledPreviewOpen(true)} title="Предпросмотр скомпилированной визуальной новеллы"><Play size={14} /> Play</button>}
+      <button className="btn" onClick={() => s.setCompileOpen(true)} title="Компиляция игры для Windows / Linux / Android">
+        <Package size={14} /> Компилировать
+      </button>
     </div>
   );
 }
@@ -321,10 +322,21 @@ export function Sidebar() {
   const [musicAiOpen, setMusicAiOpen] = useState(false);
   const [soundBuilderOpen, setSoundBuilderOpen] = useState(false);
   const q = s.search.toLowerCase();
-  const scenes = useMemo(() => {
-    const list = s.project.scenes.filter(sc => sc.name.toLowerCase().includes(q));
-    return [...list].sort((a, b) => s.sort === 'name' ? a.name.localeCompare(b.name) : b.updatedAt - a.updatedAt);
-  }, [s.project.scenes, q, s.sort]);
+  const scenes = s.project.scenes.filter(sc => sc.name.toLowerCase().includes(q));
+  const savedProject = s.activeProjectId ? readProject(s.activeProjectId) : null;
+  const sceneHasUnsavedChanges = (scene: any) => {
+    const saved = savedProject?.scenes?.find((item: any) => item.id === scene.id);
+    if (!saved) return true;
+    const savedIndex = savedProject?.scenes?.findIndex((item: any) => item.id === scene.id) ?? -1;
+    const currentIndex = s.project.scenes.findIndex((item: any) => item.id === scene.id);
+    if (savedIndex !== currentIndex) return true;
+    const clean = (value: any) => ({
+      name: value.name,
+      nodes: (value.nodes ?? []).map((node: any) => ({ ...node, selected: false })),
+      edges: (value.edges ?? []).map((edge: any) => ({ ...edge, selected: false })),
+    });
+    return JSON.stringify(clean(scene)) !== JSON.stringify(clean(saved));
+  };
   const chars = s.project.characters.filter(c => c.name.toLowerCase().includes(q));
   const bgs = s.project.backgrounds.filter(b => b.name.toLowerCase().includes(q));
   const trs = s.project.tracks.filter(t => t.name.toLowerCase().includes(q));
@@ -359,19 +371,15 @@ export function Sidebar() {
       </div>
 
       <div className="p-2 space-y-2 border-b border-ink-700">
-        <div className="relative">
-          <Search size={13} className="absolute left-2.5 top-2.5 text-mute" />
-          <input className="input !pl-7" placeholder="Поиск…" value={s.search} onChange={e => s.setSearch(e.target.value)} />
-        </div>
-        {s.leftTab === 'scenes' && (
-          <div className="flex gap-2">
-            <select className="select" value={s.sort} onChange={e => s.setSort(e.target.value as any)}>
-              <option value="updated">Сначала изменённые</option>
-              <option value="name">По имени</option>
-            </select>
-            <button className="btn btn-primary !px-2.5" onClick={s.addScene} title="Новая сцена"><Plus size={14} /></button>
+        <div className="flex items-center gap-1.5">
+          <div className="relative min-w-0 flex-1">
+            <Search size={13} className="absolute left-2.5 top-2.5 text-mute" />
+            <input className="input !pl-7" placeholder="Поиск…" value={s.search} onChange={e => s.setSearch(e.target.value)} />
           </div>
-        )}
+          {s.leftTab === 'scenes' && (
+            <button className="btn btn-primary !px-2.5 shrink-0" onClick={s.addScene} title="Новая сцена"><Plus size={14} /></button>
+          )}
+        </div>
         {s.leftTab === 'chars' && (
           <button className="btn btn-primary w-full justify-center" onClick={s.addCharacter}><Plus size={14} /> Новый персонаж</button>
         )}
@@ -389,7 +397,9 @@ export function Sidebar() {
               onDrop={() => { if (dragIdx.current !== null && dragIdx.current !== idx) s.reorderScenes(dragIdx.current, idx); dragIdx.current = null; }}
               onClick={() => s.selectScene(sc.id)}
               className={`group flex items-center gap-1.5 px-2 py-2 rounded-lg cursor-pointer border transition-all ${sc.id === s.currentSceneId ? 'border-ink-500 bg-ink-700' : 'border-transparent hover:bg-ink-800'}`}
-              style={sc.id === s.currentSceneId ? { boxShadow: 'inset 3px 0 0 var(--accent)' } : {}}
+              style={sceneHasUnsavedChanges(sc)
+                ? { borderColor: '#ffb45488', boxShadow: sc.id === s.currentSceneId ? 'inset 3px 0 0 #ffb454' : undefined }
+                : sc.id === s.currentSceneId ? { boxShadow: 'inset 3px 0 0 var(--accent)' } : {}}
             >
               <GripVertical size={12} className="text-mute opacity-40 group-hover:opacity-100 cursor-grab" />
               {renaming === sc.id ? (
@@ -402,7 +412,11 @@ export function Sidebar() {
                   onKeyDown={e => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
                 />
               ) : (
-                <span className="flex-1 truncate text-[12.5px]" onDoubleClick={e => { e.stopPropagation(); setRenaming(sc.id); }} title="Двойной клик — переименовать">
+                <span
+                  className={`flex-1 truncate text-[12.5px] ${sceneHasUnsavedChanges(sc) ? 'text-amber-glow' : ''}`}
+                  onDoubleClick={e => { e.stopPropagation(); setRenaming(sc.id); }}
+                  title={sceneHasUnsavedChanges(sc) ? 'Есть несохранённые изменения · двойной клик — переименовать' : 'Двойной клик — переименовать'}
+                >
                   {sc.name}
                 </span>
               )}
@@ -863,7 +877,6 @@ export function Inspector() {
   const node = sc?.nodes.find(n => n.selected);
   const ch = s.project.characters.find(c => c.id === s.selectedCharId);
   const d: any = node?.data ?? {};
-  const issues = s.issues();
   const condChar = s.project.characters.find(c => c.id === d.condCharId);
   const charVars = s.project.characters.find(c => c.id === d.charId)?.vars ?? [];
 
@@ -910,8 +923,14 @@ export function Inspector() {
 
   return (
     <div className={`${s.rightOpen ? 'flex' : 'hidden'} w-[320px] shrink-0 flex-col border-l border-ink-700 panel relative z-10`}>
-      <div className="h-9 shrink-0 flex items-center px-3 border-b border-ink-700 text-[10.5px] uppercase tracking-wider font-bold text-mute">
-        {ch ? 'Карточка героя' : node ? `Нода · ${KIND_META[node.type as NodeKind]?.label ?? node.type}` : 'Сцена'}
+      <div className="h-9 shrink-0 flex items-center gap-2 px-3 border-b border-ink-700 text-[10.5px] uppercase tracking-wider font-bold text-mute">
+        <span className="truncate">{ch ? 'Карточка героя' : node ? `Нода · ${KIND_META[node.type as NodeKind]?.label ?? node.type}` : 'Сцена'}</span>
+        <div className="flex-1" />
+        {node && (
+          <button className="btn !px-2 !py-1 shrink-0" onClick={() => s.playFrom(node.id)} title="Проиграть с этой ноды">
+            <Play size={12} /> <span className="hidden sm:inline">Проиграть</span>
+          </button>
+        )}
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto">
         {ch && <CharacterEditor c={ch} />}
@@ -1331,51 +1350,12 @@ export function Inspector() {
           </div>
         )}
 
-        {!ch && !node && (
-          <div className="p-3 space-y-3">
-            <Field label="Название сцены">
-              <input className="input" value={sc?.name ?? ''} onChange={e => sc && s.renameScene(sc.id, e.target.value)} />
-            </Field>
-            <div className="grid grid-cols-3 gap-2 text-center">
-              {[['Нод', sc?.nodes.length ?? 0], ['Связей', sc?.edges.length ?? 0], ['Ошибок', issues.length]].map(([l, v]) => (
-                <div key={l as string} className="rounded-lg border border-ink-600 bg-ink-850 py-2">
-                  <div className="text-lg font-bold font-display" style={{ color: l === 'Ошибок' && (v as number) > 0 ? '#ffb454' : 'var(--accent)' }}>{v}</div>
-                  <div className="text-[10px] text-mute uppercase tracking-wider">{l}</div>
-                </div>
-              ))}
-            </div>
-            <button className="btn btn-primary w-full justify-center" onClick={() => launchPlayer(s.currentSceneId)}>
-              <Play size={13} /> Проиграть в отдельном окне
-            </button>
-            <div>
-              <div className="text-[10.5px] uppercase tracking-wider text-mute mb-1">Проверка сцены</div>
-              {issues.length === 0 && <div className="text-[12px] text-lime">Всё чисто. Нажмите Play.</div>}
-              <div className="space-y-1">
-                {issues.map((it, i) => (
-                  <button
-                    key={i}
-                    className="w-full text-left text-[12px] px-2 py-1.5 rounded border border-amber-glow/30 bg-amber-glow/10 text-amber-glow hover:bg-amber-glow/20"
-                    onClick={() => it.nodeId && s.selectNode(it.nodeId)}
-                  >
-                    {it.msg}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
       {sugPhase && (
-        <div
-          className="fixed inset-0 z-[65] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
-          onClick={() => { if (!suggesting) setSugPhase(null); }}
-        >
-          <div
-            className="panel border rounded-2xl w-[min(520px,92vw)] max-h-[80vh] overflow-y-auto shadow-2xl"
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="sticky top-0 z-10 flex items-center gap-2 px-4 py-3 border-b border-ink-700 panel">
+        <FloatingWindow id={`dialogue-suggestions-${node?.id ?? 'node'}`} title={sugPhase === 'count' ? 'Сколько вариантов?' : 'Варианты реплики'} open={!!sugPhase} onClose={() => { if (!suggesting) setSugPhase(null); }} width={520} height={560}>
+          <div className="panel border rounded-2xl w-full max-h-[76vh] overflow-y-auto shadow-2xl">
+            <div data-floating-handle className="sticky top-0 z-10 flex items-center gap-2 px-4 py-3 border-b border-ink-700 panel cursor-move">
               <Sparkles size={15} style={{ color: 'var(--accent)' }} />
               <span className="font-display font-bold text-[13px] uppercase tracking-widest">
                 {sugPhase === 'count' ? 'Сколько вариантов?' : 'Варианты реплики'}
@@ -1457,7 +1437,7 @@ export function Inspector() {
               </div>
             )}
           </div>
-        </div>
+        </FloatingWindow>
       )}
     </div>
   );
@@ -2065,6 +2045,7 @@ function AiModelsPanel() {
 
     <QuantizationDialog
       open={quantizationTarget !== null}
+      windowId="quantization-model-manager"
       modelName={quantizationTarget === 'image' ? modelNameOf(cfg.modelPath || cfg.modelId) : modelNameOf(cfg.llmPath || 'VN_LLM_PATH')}
       onClose={() => setQuantizationTarget(null)}
       onSelect={mode => {
@@ -2076,9 +2057,9 @@ function AiModelsPanel() {
     />
 
     {compatibilityOpen && (
-      <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={() => setCompatibilityOpen(false)}>
-        <div className="panel border border-ink-600 rounded-2xl w-[min(620px,96vw)] max-h-[88vh] overflow-y-auto p-4 shadow-2xl space-y-3" onClick={e => e.stopPropagation()}>
-          <div className="flex items-center gap-2">
+      <FloatingWindow id="model-compatibility" title="Совместимость моделей и компьютера" open={compatibilityOpen} onClose={() => setCompatibilityOpen(false)} width={620} height={700}>
+        <div className="panel border border-ink-600 rounded-2xl w-full max-h-[82vh] overflow-y-auto p-4 shadow-2xl space-y-3">
+          <div data-floating-handle className="flex items-center gap-2 cursor-move">
             <ScanSearch size={16} style={{ color: 'var(--accent)' }} />
             <span className="font-bold text-[13px]">Совместимость моделей и компьютера</span>
             <div className="flex-1" />
@@ -2156,13 +2137,13 @@ function AiModelsPanel() {
             <button className="btn" onClick={() => setCompatibilityOpen(false)}>Закрыть</button>
           </div>
         </div>
-      </div>
+      </FloatingWindow>
     )}
 
     {addMode && (
-      <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={() => !downloadProg.on && setAddMode(null)}>
-        <div className="panel border border-ink-600 rounded-2xl w-[min(520px,94vw)] p-4 shadow-2xl space-y-3" onClick={e => e.stopPropagation()}>
-          <div className="flex items-center gap-2">
+      <FloatingWindow id="add-ai-model" title="Добавить модель" open={!!addMode} onClose={() => { if (!downloadProg.on && !apiChecking) setAddMode(null); }} width={520} height={520}>
+        <div className="panel border border-ink-600 rounded-2xl w-full p-4 shadow-2xl space-y-3">
+          <div data-floating-handle className="flex items-center gap-2 cursor-move">
             <Package size={16} style={{ color: 'var(--accent)' }} />
             <span className="font-bold text-[13px]">Добавить модель</span>
             <div className="flex-1" />
@@ -2219,7 +2200,7 @@ function AiModelsPanel() {
             </div>
           )}
         </div>
-      </div>
+      </FloatingWindow>
     )}
     </>
   );
@@ -2231,9 +2212,9 @@ export function DirectorConsole() {
   const set = s.setDirector;
   if (!s.consoleOpen) return null;
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => s.setConsoleOpen(false)}>
-      <div className="panel border rounded-2xl w-[min(960px,96vw)] max-h-[88vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
-        <div className="sticky top-0 z-10 flex items-center gap-2 px-4 py-3 border-b border-ink-700 panel">
+    <FloatingWindow id="director-console" title="Режиссёрский пульт" open={s.consoleOpen} onClose={() => s.setConsoleOpen(false)} width={960} height={760}>
+      <div className="panel border rounded-2xl w-full max-h-[86vh] overflow-y-auto shadow-2xl">
+        <div data-floating-handle className="sticky top-0 z-10 flex items-center gap-2 px-4 py-3 border-b border-ink-700 panel cursor-move">
           <Settings size={15} style={{ color: 'var(--accent)' }} />
           <span className="font-display font-bold text-[13px] uppercase tracking-widest">Режиссёрский пульт</span>
           <div className="flex-1" />
@@ -2291,7 +2272,7 @@ export function DirectorConsole() {
           </Group>
         </div>
       </div>
-    </div>
+    </FloatingWindow>
   );
 }
 
