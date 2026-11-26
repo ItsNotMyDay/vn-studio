@@ -100,7 +100,7 @@ export const KIND_META: Record<NodeKind, { label: string; color: string; icon: s
   choice: { label: 'Выбор', color: '#ff4d8d', icon: 'branch', group: 'Диалог' },
   variable: { label: 'Переменная', color: '#8b7bff', icon: 'sigma', group: 'Логика' },
   background: { label: 'Фон', color: '#ffb454', icon: 'image', group: 'Медиа' },
-  music: { label: 'Музыка', color: '#ff6b3d', icon: 'music', group: 'Медиа' },
+  music: { label: 'Аудио', color: '#ff6b3d', icon: 'music', group: 'Медиа' },
   entity: { label: 'Сущность', color: '#2ee6a8', icon: 'user', group: 'Сцена' },
   pause: { label: 'Пауза', color: '#e0c341', icon: 'timer', group: 'Поток' },
   jump: { label: 'Прыжок', color: '#38bdf8', icon: 'jump', group: 'Поток' },
@@ -546,7 +546,7 @@ interface Store {
   deleteCharacter: (id: string) => void;
 
   uploadBackground: (file: File) => Promise<void>;
-  uploadTrack: (file: File) => Promise<void>;
+  uploadTrack: (file: File, mode?: 'music' | 'effect') => Promise<void>;
   addTrackBlob: (name: string, blob: Blob, mode?: 'music' | 'effect', commitBefore?: boolean) => Promise<string>;
   renameTrack: (id: string, name: string, commitBefore?: boolean) => void;
   uploadSprite: (charId: string, expression: string, file: File) => Promise<void>;
@@ -1292,13 +1292,13 @@ export const useStore = create<Store>((set, get) => {
         get().toast('Фон добавлен в ассеты');
       } catch { get().toast('Не удалось сохранить фон'); }
     },
-    uploadTrack: async file => {
+    uploadTrack: async (file, mode = 'music') => {
       if (!file.type.startsWith('audio/')) { get().toast('Нужен аудиофайл'); return; }
       try {
         const assetId = await importFile(file, 'tr');
         get().commit();
-        set(s => ({ project: { ...s.project, tracks: [...s.project.tracks, { id: uid('tr'), name: file.name.replace(/\.[^.]+$/, ''), freqs: [], color: '#9dff57', assetId }] } }));
-        get().toast(`Трек загружен: ${file.name}`);
+        set(s => ({ project: { ...s.project, tracks: [...s.project.tracks, { id: uid('tr'), name: file.name.replace(/\.[^.]+$/, ''), freqs: [], color: mode === 'effect' ? '#9dff57' : '#ff6b3d', assetId, mode }] } }));
+        get().toast(mode === 'effect' ? `Звуковой эффект загружен: ${file.name}` : `Трек загружен: ${file.name}`);
       } catch { get().toast('Не удалось сохранить файл'); }
     },
     addTrackBlob: async (name, blob, mode = 'music', commitBefore = true) => {
