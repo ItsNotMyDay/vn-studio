@@ -530,6 +530,7 @@ fn install_and_start_ai_server(
         .try_clone()
         .map_err(|error| format!("Не удалось подготовить журнал AI-сервера: {error}"))?;
 
+    let port_arg = port.to_string();
     let mut command = Command::new(&python_exe);
     command
         .args([
@@ -539,7 +540,7 @@ fn install_and_start_ai_server(
             "--host",
             "127.0.0.1",
             "--port",
-            &port.to_string(),
+            port_arg.as_str(),
         ])
         .current_dir(&source_dir)
         .envs(environment.iter().map(|(key, value)| (key, value)))
