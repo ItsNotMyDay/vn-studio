@@ -876,7 +876,6 @@ export function Inspector() {
   const node = sc?.nodes.find(n => n.selected);
   const ch = s.project.characters.find(c => c.id === s.selectedCharId);
   const d: any = node?.data ?? {};
-  const issues = s.issues();
   const condChar = s.project.characters.find(c => c.id === d.condCharId);
   const charVars = s.project.characters.find(c => c.id === d.charId)?.vars ?? [];
 
