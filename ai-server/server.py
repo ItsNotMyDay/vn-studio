@@ -86,7 +86,7 @@ LLM_LOCK = threading.Lock()
 LLM_STATE = {"model": None, "tokenizer": None, "processor": None, "loaded": False,
              "path": None, "device": None, "adapter": None, "profile": None, "error": None}
 
-EMBED_PATH_DEFAULT = os.environ.get("VN_EMBED_PATH", "").strip()
+EMBED_PATH_DEFAULT = os.environ.get("VN_EMBED_PATH", os.path.join(MODELS_DIR_DEFAULT, "e5-small")).strip()
 EMBED_INDEX_DIR = os.path.join(SERVER_DATA_DIR, "embeddings")
 os.makedirs(EMBED_INDEX_DIR, exist_ok=True)
 EMBED_LOCK = threading.RLock()
@@ -1365,6 +1365,7 @@ def health():
         loaded = STATE["loaded"]
         return {
             "ok": True, "service": "vn-studio-ai",
+            "server_revision": os.environ.get("VN_SERVER_REVISION", ""),
             "device": STATE["device"] if loaded else None,
             "gpu_name": None, "vram_gb": STATE["vram_gb"] if loaded else None,
             "model_loaded": loaded, "model_id": STATE["model_id"],
