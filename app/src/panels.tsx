@@ -23,6 +23,7 @@ import { AiAudioDialog } from './AiAudioDialog';
 import { QuantizationDialog } from './QuantizationDialog';
 import { AudioEditor } from './AudioEditor';
 import { SoundEffectBuilder } from './SoundEffectBuilder';
+import { FloatingWindow } from './FloatingWindow';
 import { readProject } from './projects';
 import {
   loadAiSettings, saveAiSettings, aiHealth, llmHealth, embeddingsHealth, embeddingsClear, aiListModels,
@@ -2247,9 +2248,9 @@ export function DirectorConsole() {
   const set = s.setDirector;
   if (!s.consoleOpen) return null;
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => s.setConsoleOpen(false)}>
-      <div className="panel border rounded-2xl w-[min(960px,96vw)] max-h-[88vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
-        <div className="sticky top-0 z-10 flex items-center gap-2 px-4 py-3 border-b border-ink-700 panel">
+    <FloatingWindow id="director-console" title="Режиссёрский пульт" open={s.consoleOpen} onClose={() => s.setConsoleOpen(false)} width={960} height={760}>
+      <div className="panel border rounded-2xl w-full max-h-[86vh] overflow-y-auto shadow-2xl">
+        <div data-floating-handle className="sticky top-0 z-10 flex items-center gap-2 px-4 py-3 border-b border-ink-700 panel cursor-move">
           <Settings size={15} style={{ color: 'var(--accent)' }} />
           <span className="font-display font-bold text-[13px] uppercase tracking-widest">Режиссёрский пульт</span>
           <div className="flex-1" />
@@ -2307,7 +2308,7 @@ export function DirectorConsole() {
           </Group>
         </div>
       </div>
-    </div>
+    </FloatingWindow>
   );
 }
 
