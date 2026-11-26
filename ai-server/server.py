@@ -35,18 +35,29 @@ LLM_PATH_DEFAULT = os.environ.get("VN_LLM_PATH", "C:\\models\\qwen3-14b")
 app = FastAPI(title="VN Studio local AI server")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-# Transformers lazy modules are NOT thread-safe on first import.
-# Touch the supported Auto classes once, single-threaded, when the server starts.
-try:
-    import transformers as _transformers
-    for _auto_name in (
-        "AutoTokenizer", "AutoProcessor", "AutoModel", "AutoModelForCausalLM",
-        "AutoModelForSeq2SeqLM", "AutoModelForMultimodalLM",
-        "AutoModelForImageTextToText", "AutoModelForVision2Seq",
-    ):
-        getattr(_transformers, _auto_name, None)
-except Exception as _pre:
-    print("[warn] transformers pre-import:", _pre)
+# Transformers can take several seconds to initialize. Defer that cost until
+# a model/embedding feature is requested, but keep the first import serialized:
+# Transformers' lazy Auto classes are not thread-safe during first access.
+_TRANSFORMERS_INIT_LOCK = threading.Lock()
+_TRANSFORMERS_INIT_ATTEMPTED = False
+
+def _ensure_transformers_ready():
+    global _TRANSFORMERS_INIT_ATTEMPTED
+    with _TRANSFORMERS_INIT_LOCK:
+        if _TRANSFORMERS_INIT_ATTEMPTED:
+            return
+        _TRANSFORMERS_INIT_ATTEMPTED = True
+        try:
+            import transformers as _transformers
+            for _auto_name in (
+                "AutoTokenizer", "AutoProcessor", "AutoModel", "AutoModelForCausalLM",
+                "AutoModelForSeq2SeqLM", "AutoModelForMultimodalLM",
+                "AutoModelForImageTextToText", "AutoModelForVision2Seq",
+            ):
+                getattr(_transformers, _auto_name, None)
+        except Exception as _pre:
+            # Keep the API available even when optional AI dependencies are broken.
+            print("[warn] transformers initialization:", _pre)
 
 LOCK = threading.Lock()
 JOBS: dict = {}
@@ -69,6 +80,7 @@ EMBED_STATE = {"model": None, "tokenizer": None, "loaded": False, "error": None}
 EMBED_DIM = 384
 
 def load_embed(path: str):
+    _ensure_transformers_ready()
     import torch
     with EMBED_LOCK:
         if EMBED_STATE["loaded"]:
@@ -292,6 +304,7 @@ class ModelCompatibilityReq(BaseModel):
 # ============================================================
 
 def cuda_info():
+    # Called only by actual model loading, never by the lightweight health probe.
     try:
         import torch
         if torch.cuda.is_available():
@@ -487,6 +500,7 @@ def _compatibility_warnings(report: dict) -> list[str]:
 
 
 def load_model(model_id: str, raw_path: str, job: dict, quantization_mode: str = "none"):
+    _ensure_transformers_ready()
     import torch
     from diffusers import DiffusionPipeline
 
@@ -807,6 +821,7 @@ def _llm_max_memory(compatibility: dict) -> Optional[dict]:
 
 
 def load_llm(path: str, quantization_mode: str = "none"):
+    _ensure_transformers_ready()
     import torch
     from transformers import AutoTokenizer
 
@@ -1274,6 +1289,7 @@ def worker():
                     job["stage"] = "Generating"
                     job["progress"] = 0.5
                     if not LLM_STATE["loaded"]:
+                        _ensure_transformers_ready()
                         compatibility = build_compatibility_report(LLM_PATH_DEFAULT, "llm")
                         job["warnings"] = _compatibility_warnings(compatibility)
                         if not load_llm(LLM_PATH_DEFAULT, "none"):
@@ -1321,13 +1337,15 @@ def enqueue(kind, req, warnings: Optional[list[str]] = None) -> str:
 
 @app.get("/health")
 def health():
-    device, vram, name = cuda_info()
+    # Readiness must not import PyTorch: its cold import can take several
+    # seconds. GPU details are provided by /system/diagnostics when requested.
     with LOCK:
+        loaded = STATE["loaded"]
         return {
             "ok": True, "service": "vn-studio-ai",
-            "device": STATE["device"] if STATE["loaded"] else device,
-            "gpu_name": name, "vram_gb": vram,
-            "model_loaded": STATE["loaded"], "model_id": STATE["model_id"],
+            "device": STATE["device"] if loaded else None,
+            "gpu_name": None, "vram_gb": STATE["vram_gb"] if loaded else None,
+            "model_loaded": loaded, "model_id": STATE["model_id"],
             "path": STATE["path"], "strategy": STATE["strategy"], "quant": STATE["quant"],
             "supports_alpha": STATE["supports_alpha"],
             "index_keys": STATE["index_keys"], "required": STATE["required"], "explicit": STATE["explicit"],
@@ -1351,6 +1369,7 @@ def models_compatibility(req: ModelCompatibilityReq):
         path = req.model_path or LLM_PATH_DEFAULT
     else:
         raise HTTPException(400, "model_kind должен быть llm или image")
+    _ensure_transformers_ready()
     return build_compatibility_report(path, req.model_kind)
 
 
@@ -1363,6 +1382,7 @@ def system_diagnostics():
 def model_load(req: LoadReq):
     try:
         path = resolve_path(req.model_path or "", req.model_id)
+        _ensure_transformers_ready()
         compatibility = build_compatibility_report(path, "image")
     except HTTPException:
         raise
@@ -1412,6 +1432,7 @@ def llm_load(req: Optional[LoadReq] = None):
     path = request.model_path or LLM_PATH_DEFAULT
     if not os.path.isdir(path):
         raise HTTPException(404, detail=f"LLM folder not found: {path}")
+    _ensure_transformers_ready()
     compatibility = build_compatibility_report(path, "llm")
     with LLM_LOCK:
         current_quantization = (LLM_STATE.get("profile") or {}).get("quantization", "none")

@@ -171,7 +171,7 @@ export function AiBackgroundDialog({ open, onClose }: { open: boolean; onClose: 
             className="chip !text-[10px]"
             style={{ borderColor: health.ok ? '#9dff5766' : '#ff547066', color: health.ok ? '#9dff57' : '#ff5470' }}
           >
-            <Server size={11} /> {health.ok ? `${health.device ?? 'gpu'}${health.model_loaded ? ' · модель в памяти' : ''}` : 'сервер офлайн'}
+            <Server size={11} /> {health.ok ? `${health.device ?? 'сервер готов'}${health.model_loaded ? ' · модель в памяти' : ''}` : 'сервер офлайн'}
           </span>
           <button className="btn !px-2" disabled={busy} onClick={onClose} title="Закрыть"><X size={14} /></button>
         </div>
