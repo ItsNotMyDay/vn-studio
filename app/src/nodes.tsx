@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import {
-  MessageSquare, GitBranch, Sigma, Image as ImageIcon, Music, UserRound, Square as StopIcon,
+  Play, MessageSquare, GitBranch, Sigma, Image as ImageIcon, Music, UserRound, Square as StopIcon,
   Move, Eye, EyeOff, Type, Hash, Percent, ToggleLeft, Timer, Navigation
 } from 'lucide-react';
 import {
