@@ -305,19 +305,21 @@ export function LlmChat({ open: isOpen, onOpenChange: setIsOpen }: LlmChatProps)
     <aside className={`${s.rightOpen ? 'flex' : 'hidden'} w-[320px] min-w-[320px] shrink-0 flex-col border-l border-ink-700 panel relative z-10 min-h-0`}>
       <div className="w-full h-full min-h-0 flex flex-col overflow-hidden text-left">
       <div className="shrink-0 px-3 py-2 border-b border-ink-700 space-y-1 text-left">
-        <div className="flex items-center gap-2">
-          <MessageSquare size={15} style={{ color: 'var(--accent)' }} />
-          <span className="font-display font-bold text-[12px] uppercase tracking-wider">AI-Консультант</span>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <MessageSquare size={15} className="shrink-0" style={{ color: 'var(--accent)' }} />
+          <span className="font-display font-bold text-[11px] uppercase tracking-wider whitespace-nowrap">AI-консультант</span>
           <div className="flex-1" />
-          <span className="chip !text-[10px]" style={{ borderColor: status.online ? '#9dff5766' : '#ff547066', color: status.online ? '#9dff57' : '#ff5470' }}>
-            <Server size={11} /> {status.online ? 'онлайн' : 'офлайн'}
-          </span>
-          <button className="btn !px-2" onClick={refresh} title="Обновить статус"><RefreshCw size={13} /></button>
-          <button className="btn !px-2" onClick={() => { setMessages([]); setRagCount(0); setPendingPlan(null); setLastLog(null); s.toast('Чат очищен'); }} disabled={messages.length === 0} title="Очистить чат"><Trash2 size={14} /></button>
-          <button className="btn !px-2" onClick={() => setIsOpen(false)} title="Закрыть"><X size={14} /></button>
+          <button className="btn !px-1.5 shrink-0" onClick={refresh} title="Обновить статус"><RefreshCw size={13} /></button>
+          <button className="btn !px-1.5 shrink-0" onClick={() => { setMessages([]); setRagCount(0); setPendingPlan(null); setLastLog(null); s.toast('Чат очищен'); }} disabled={messages.length === 0} title="Очистить чат"><Trash2 size={14} /></button>
+          <button className="btn !px-1.5 shrink-0" onClick={() => setIsOpen(false)} title="Закрыть"><X size={14} /></button>
         </div>
-        <div className="pl-[26px] text-[10px] text-mute opacity-60 truncate text-left" title={status.path ?? ''}>
-          {status.loaded ? `${modelName(status.path)} · ${status.device ?? 'auto'}` : status.online ? 'модель не загружена в память' : 'сервер генерации недоступен'}
+        <div className="flex min-w-0 items-center gap-2 pl-[26px]">
+          <span className="chip !text-[9px] shrink-0" style={{ borderColor: status.online ? '#9dff5766' : '#ff547066', color: status.online ? '#9dff57' : '#ff5470' }}>
+            <Server size={10} /> {status.online ? 'онлайн' : 'офлайн'}
+          </span>
+          <span className="min-w-0 truncate text-[10px] text-mute opacity-60 text-left" title={status.path ?? ''}>
+            {status.loaded ? `${modelName(status.path)} · ${status.device ?? 'auto'}` : status.online ? 'модель не загружена в память' : 'сервер генерации недоступен'}
+          </span>
         </div>
         <div className="flex items-center gap-1.5 pt-1 flex-wrap">
           <BookOpen size={12} className="text-mute shrink-0" />
