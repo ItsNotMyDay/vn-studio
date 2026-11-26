@@ -247,6 +247,7 @@ function SpriteThumb({ c, expr, big = false }: any) {
 
 export function Toolbar() {
   const s = useStore();
+  const issues = s.issues();
   const [showIssues, setShowIssues] = useState(false);
   return (
     <div className="relative z-20 h-12 shrink-0 flex items-center gap-2 px-3 border-b border-ink-700 panel">
