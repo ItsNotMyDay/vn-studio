@@ -113,7 +113,7 @@ async fn ensure_ai_server(app: AppHandle, endpoint: String) -> Result<Value, Str
         }
 
         let source_dir = root.join(format!("server-src-{}", &AI_SERVER_REVISION[..12]));
-        if !source_dir.join("server.py").is_file() {
+        if !source_dir.join("server.py").is_file() || !source_dir.join("requirements.txt").is_file() {
             emit_setup_progress(&app, 0.14, "Скачивание AI-сервера", "Загружаем зафиксированную версию server.py и модулей VN Studio");
             let source_url = format!(
                 "https://codeload.github.com/ItsNotMyDay/vn-studio/zip/{}",
@@ -221,6 +221,10 @@ async fn download_to_file(
     let temporary = destination.with_extension("download");
     fs::write(&temporary, &bytes)
         .map_err(|error| format!("Не удалось сохранить {stage}: {error}"))?;
+    if destination.exists() {
+        fs::remove_file(destination)
+            .map_err(|error| format!("Не удалось заменить предыдущий файл {stage}: {error}"))?;
+    }
     fs::rename(&temporary, destination)
         .map_err(|error| format!("Не удалось завершить сохранение {stage}: {error}"))?;
     emit_setup_progress(
