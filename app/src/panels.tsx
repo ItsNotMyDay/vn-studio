@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Play, Square, Undo2, Redo2, Save, Download, FileText, Volume2, VolumeX, Plus, Trash2,
-  Search, GripVertical, Clapperboard, AlertTriangle, PanelLeft, PanelRight, RotateCcw, Shuffle,
+  Search, GripVertical, Clapperboard, AlertTriangle, PanelLeft, RotateCcw, Shuffle,
   MessageSquare, GitBranch, Sigma, Image, Music, AudioLines, StopCircle, X, Settings, Upload, Sparkles,
   RefreshCw, Loader2, Server, Database, Eye, UserRound, Package, FolderOpen, KeyRound,
   Cpu, ScanSearch, CheckCircle2, SlidersHorizontal
@@ -153,9 +153,9 @@ function TrackAudioEditorModal({ track, onClose }: { track: Track; onClose: () =
   };
 
   return (
-    <div className="fixed inset-0 z-[96] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="panel border border-ink-600 rounded-2xl w-[min(920px,96vw)] max-h-[92vh] overflow-y-auto shadow-2xl" onClick={event => event.stopPropagation()}>
-        <div className="sticky top-0 z-10 flex items-center gap-2 px-4 py-3 border-b border-ink-700 panel">
+    <FloatingWindow id={`audio-editor-${track.id}`} title={`Аудиоредактор · ${track.name}`} open onClose={onClose} width={920} height={720}>
+      <div className="panel border border-ink-600 rounded-2xl w-full max-h-[86vh] overflow-y-auto shadow-2xl">
+        <div data-floating-handle className="sticky top-0 z-10 flex items-center gap-2 px-4 py-3 border-b border-ink-700 panel cursor-move">
           <SlidersHorizontal size={15} style={{ color: 'var(--accent)' }} />
           <span className="font-display font-bold text-[12px] uppercase tracking-wider">Редактирование аудиоассета</span>
           <span className="text-[11px] text-mute truncate">{track.name}</span>
@@ -174,7 +174,7 @@ function TrackAudioEditorModal({ track, onClose }: { track: Track; onClose: () =
           {saving && <div className="text-[10px] text-mute">Сохраняем изменённый файл в ассеты…</div>}
         </div>
       </div>
-    </div>
+    </FloatingWindow>
   );
 }
 
@@ -1384,15 +1384,9 @@ export function Inspector() {
       </div>
 
       {sugPhase && (
-        <div
-          className="fixed inset-0 z-[65] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
-          onClick={() => { if (!suggesting) setSugPhase(null); }}
-        >
-          <div
-            className="panel border rounded-2xl w-[min(520px,92vw)] max-h-[80vh] overflow-y-auto shadow-2xl"
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="sticky top-0 z-10 flex items-center gap-2 px-4 py-3 border-b border-ink-700 panel">
+        <FloatingWindow id={`dialogue-suggestions-${node?.id ?? 'node'}`} title={sugPhase === 'count' ? 'Сколько вариантов?' : 'Варианты реплики'} open={!!sugPhase} onClose={() => { if (!suggesting) setSugPhase(null); }} width={520} height={560}>
+          <div className="panel border rounded-2xl w-full max-h-[76vh] overflow-y-auto shadow-2xl">
+            <div data-floating-handle className="sticky top-0 z-10 flex items-center gap-2 px-4 py-3 border-b border-ink-700 panel cursor-move">
               <Sparkles size={15} style={{ color: 'var(--accent)' }} />
               <span className="font-display font-bold text-[13px] uppercase tracking-widest">
                 {sugPhase === 'count' ? 'Сколько вариантов?' : 'Варианты реплики'}
@@ -1474,7 +1468,7 @@ export function Inspector() {
               </div>
             )}
           </div>
-        </div>
+        </FloatingWindow>
       )}
     </div>
   );
@@ -2093,9 +2087,9 @@ function AiModelsPanel() {
     />
 
     {compatibilityOpen && (
-      <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={() => setCompatibilityOpen(false)}>
-        <div className="panel border border-ink-600 rounded-2xl w-[min(620px,96vw)] max-h-[88vh] overflow-y-auto p-4 shadow-2xl space-y-3" onClick={e => e.stopPropagation()}>
-          <div className="flex items-center gap-2">
+      <FloatingWindow id="model-compatibility" title="Совместимость моделей и компьютера" open={compatibilityOpen} onClose={() => setCompatibilityOpen(false)} width={620} height={700}>
+        <div className="panel border border-ink-600 rounded-2xl w-full max-h-[82vh] overflow-y-auto p-4 shadow-2xl space-y-3">
+          <div data-floating-handle className="flex items-center gap-2 cursor-move">
             <ScanSearch size={16} style={{ color: 'var(--accent)' }} />
             <span className="font-bold text-[13px]">Совместимость моделей и компьютера</span>
             <div className="flex-1" />
@@ -2173,7 +2167,7 @@ function AiModelsPanel() {
             <button className="btn" onClick={() => setCompatibilityOpen(false)}>Закрыть</button>
           </div>
         </div>
-      </div>
+      </FloatingWindow>
     )}
 
     {addMode && (
