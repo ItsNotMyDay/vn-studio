@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { FloatingWindow } from './FloatingWindow';
 import { AudioLines, Check, Loader2, Music2, X } from 'lucide-react';
 import { useStore } from './store';
 import { aiAudioGenerate, aiAudioHealth, type JobState } from './ai';
@@ -128,15 +129,12 @@ export function AiAudioDialog({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-[85] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
-      onClick={() => !busy && onClose()}
-    >
+    <FloatingWindow id="ai-audio-generator" title="AI-генерация музыки" open={open} onClose={onClose} width={760} height={720}>
       <div
         className="panel border border-ink-600 rounded-2xl w-[min(760px,95vw)] max-h-[92vh] overflow-y-auto shadow-2xl"
         onClick={e => e.stopPropagation()}
       >
-        <div className="sticky top-0 z-10 flex items-center gap-2 px-4 py-3 border-b border-ink-700 panel">
+        <div data-floating-handle className="sticky top-0 z-10 flex items-center gap-2 px-4 py-3 border-b border-ink-700 panel cursor-move">
           <AudioLines size={16} style={{ color: 'var(--accent)' }} />
           <span className="font-display font-bold text-[13px] uppercase tracking-widest">
             AI-генерация музыки
@@ -263,6 +261,6 @@ export function AiAudioDialog({
           </div>
         )}
       </div>
-    </div>
+    </FloatingWindow>
   );
 }
