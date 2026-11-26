@@ -603,11 +603,13 @@ fn install_and_start_ai_server(
     let torch_probe = Command::new(&python_exe)
         .args([
             "-c",
-            "import torch, torchvision; "
-                "print('torch=' + str(torch.__version__)); "
-                "print('cuda=' + str(torch.cuda.is_available())); "
-                "print('cuda_runtime=' + str(torch.version.cuda)); "
+            concat!(
+                "import torch, torchvision; ",
+                "print('torch=' + str(torch.__version__)); ",
+                "print('cuda=' + str(torch.cuda.is_available())); ",
+                "print('cuda_runtime=' + str(torch.version.cuda)); ",
                 "print('xpu=' + str(hasattr(torch, 'xpu') and torch.xpu.is_available()))",
+            ),
         ])
         .output()
         .map_err(|error| format!("Не удалось проверить PyTorch: {error}"))?;
