@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import { FloatingWindow } from './FloatingWindow';
 import { MessageSquare, Send, Loader2, X, Server, Trash2, RefreshCw, Square, Database, BookOpen, Wrench, Check, Ban, Undo2 } from 'lucide-react';
 import { useStore } from './store';
 import { aiHealth, llmHealth, llmLoadJob, llmChat, aiCancelJob, embeddingsSearch, embeddingsIndex, loadAiSettings, openAiListModels, type AiSettings, type LlmMessage, type RichContext } from './ai';
@@ -287,9 +286,11 @@ export function LlmChat({ open: isOpen, onOpenChange: setIsOpen }: LlmChatProps)
   const dotColor = !status.online ? '#ff5470' : status.loaded ? '#9dff57' : '#ffb454';
 
   if (!isOpen) {
+    const hasInspector = s.rightOpen && (!!s.selectedCharId || !!s.scene()?.nodes.some(node => node.selected));
     return (
       <button
-        className="fixed bottom-4 right-4 z-[60] btn btn-primary !px-3 !py-2 shadow-2xl opacity-35 hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+        className="fixed bottom-4 z-[60] btn btn-primary !px-3 !py-2 shadow-2xl opacity-35 hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+        style={{ right: hasInspector ? 340 : 16 }}
         onClick={() => setIsOpen(true)}
         title="AI-консультант"
         aria-label="Открыть AI-консультант"
@@ -301,9 +302,9 @@ export function LlmChat({ open: isOpen, onOpenChange: setIsOpen }: LlmChatProps)
   }
 
   return (
-    <FloatingWindow id="ai-consultant" title="AI-консультант" open={isOpen} onClose={() => setIsOpen(false)} width={460} height={600}>
-      <div className="w-full h-[min(600px,80vh)] flex flex-col panel border border-ink-600 rounded-xl shadow-2xl text-left">
-      <div data-floating-handle className="px-3 py-2 border-b border-ink-700 space-y-1 text-left cursor-move">
+    <aside className={`${s.rightOpen ? 'flex' : 'hidden'} w-[320px] min-w-[320px] shrink-0 flex-col border-l border-ink-700 panel relative z-10 min-h-0`}>
+      <div className="w-full h-full min-h-0 flex flex-col overflow-hidden text-left">
+      <div className="shrink-0 px-3 py-2 border-b border-ink-700 space-y-1 text-left">
         <div className="flex items-center gap-2">
           <MessageSquare size={15} style={{ color: 'var(--accent)' }} />
           <span className="font-display font-bold text-[12px] uppercase tracking-wider">AI-Консультант</span>
@@ -318,9 +319,9 @@ export function LlmChat({ open: isOpen, onOpenChange: setIsOpen }: LlmChatProps)
         <div className="pl-[26px] text-[10px] text-mute opacity-60 truncate text-left" title={status.path ?? ''}>
           {status.loaded ? `${modelName(status.path)} · ${status.device ?? 'auto'}` : status.online ? 'модель не загружена в память' : 'сервер генерации недоступен'}
         </div>
-        <div className="flex items-center gap-1.5 pt-1">
+        <div className="flex items-center gap-1.5 pt-1 flex-wrap">
           <BookOpen size={12} className="text-mute shrink-0" />
-          <select className="select !py-0.5 !text-[11px] !w-40" value={ctxMode} onChange={e => setCtxMode(e.target.value as any)} title="Какой контекст передавать модели">
+          <select className="select !py-0.5 !text-[11px] !w-32" value={ctxMode} onChange={e => setCtxMode(e.target.value as any)} title="Какой контекст передавать модели">
             <option value="scene">Вся текущая сцена</option>
             <option value="node">До выбранной реплики</option>
             <option value="off">Без контекста</option>
@@ -444,6 +445,6 @@ export function LlmChat({ open: isOpen, onOpenChange: setIsOpen }: LlmChatProps)
         onSelect={mode => { setQuantizationOpen(false); void loadLlm(mode); }}
       />
       </div>
-    </FloatingWindow>
+    </aside>
   );
 }
