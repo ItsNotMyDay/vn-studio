@@ -245,7 +245,7 @@ function SpriteThumb({ c, expr, big = false }: any) {
 
 /* ---------------------------------- toolbar -------------------------------- */
 
-export function Toolbar({ onOpenConsultant, consultantOpen = false }: { onOpenConsultant?: () => void; consultantOpen?: boolean }) {
+export function Toolbar() {
   const s = useStore();
   const issues = s.issues();
   const [showIssues, setShowIssues] = useState(false);
@@ -293,24 +293,14 @@ export function Toolbar({ onOpenConsultant, consultantOpen = false }: { onOpenCo
       <button className="btn" onClick={s.save} title="Сохранить (Ctrl+S)"><Save size={14} /><span className="hidden xl:inline">Сохранить</span></button>
       <button className="btn" onClick={s.exportScript} title="Экспорт сценария в текст"><FileText size={14} /><span className="hidden xl:inline">Сценарий</span></button>
       <button
-        className="btn"
+        className="btn !w-9 !px-0 justify-center"
         style={s.consoleOpen ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : {}}
         onClick={() => s.setConsoleOpen(!s.consoleOpen)}
         title="Режиссёрский пульт (P)"
       >
         <Settings size={14} />
       </button>
-      {onOpenConsultant && (
-        <button
-          className="btn"
-          style={consultantOpen ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : {}}
-          onClick={onOpenConsultant}
-          title="AI-консультант"
-        >
-          <MessageSquare size={14} />
-        </button>
-      )}
-      <button className="btn" onClick={s.toggleMute} title="Звук">
+      <button className="btn !w-9 !px-0 justify-center" onClick={s.toggleMute} title="Звук">
         {s.muted ? <VolumeX size={14} className="text-danger" /> : <Volume2 size={14} className="text-lime" />}
       </button>
       {s.player.running
