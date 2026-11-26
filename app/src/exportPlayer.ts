@@ -556,6 +556,44 @@ const README = `VN Studio - собранная игра (Windows)
 Linux и Android сборки появятся в следующих версиях VN Studio.
 `;
 
+export async function buildCompiledPreviewHtml(): Promise<string> {
+  const s = useStore.getState();
+  const project = JSON.parse(JSON.stringify(s.project));
+  const director = { ...s.director };
+  const assetIds = new Set<string>();
+  project.backgrounds.forEach((b: any) => b.assetId && assetIds.add(b.assetId));
+  project.tracks.forEach((t: any) => t.assetId && assetIds.add(t.assetId));
+  project.sprites.forEach((x: any) => x.assetId && assetIds.add(x.assetId));
+  project.characters.forEach((character: any) =>
+    Object.values(character.sprites ?? {}).forEach((id: any) => id && assetIds.add(String(id)))
+  );
+
+  const assets: Record<string, string> = {};
+  for (const id of assetIds) {
+    const url = await getAssetURL(id);
+    if (!url) continue;
+    const blob = await fetch(url).then(response => {
+      if (!response.ok) throw new Error('Не удалось прочитать ассет ' + id);
+      return response.blob();
+    });
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length)));
+    }
+    assets[id] = 'data:' + (blob.type || 'application/octet-stream') + ';base64,' + btoa(binary);
+  }
+
+  const moveCss: Record<string, string> = {
+    linear: 'linear', 'ease-in': 'cubic-bezier(.55,.06,.68,.19)', 'ease-out': 'cubic-bezier(.22,.9,.32,1)',
+    'ease-in-out': 'cubic-bezier(.65,.05,.36,1)', overshoot: 'cubic-bezier(.34,1.56,.64,1)', spring: 'cubic-bezier(.34,1.8,.44,1)',
+  };
+  const payload = JSON.stringify({ project, director, assets, moveCss }).replace(/</g, '\\u003c');
+  const bootstrap = '<script>window.VN_GAME=' + payload + ';(' + runtime.toString() + ')(window.VN_GAME);</script>';
+  return INDEX_HTML.replace('<script src="game.js"></script>', bootstrap);
+}
+
 export interface CompileProgress { step: string; detail?: string; }
 
 export async function compileWindows(opts: { title: string; includeAssets: boolean }, onProgress: (p: CompileProgress) => void): Promise<{ blob: Blob; name: string; files: string[]; bytes: number }> {
