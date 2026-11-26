@@ -8,7 +8,9 @@ import { X, Search, Clapperboard } from 'lucide-react';
 import { Toolbar, Sidebar, Inspector, DirectorConsole, PaletteDragGhost, Toasts } from './panels';
 import { nodeTypes } from './nodes';
 import { StagePreview } from './StagePreview';
+import { CompiledPreviewWindow } from './CompiledPreviewWindow';
 import { Stage } from './stage';
+import { activateMainWindow, isMainWindowActive } from './windowFocus';
 import { LlmChat } from './LlmChat';
 import { Launcher } from './Launcher';
 import { CompileDialog } from './CompileDialog';
@@ -67,7 +69,7 @@ function Canvas() {
   }, [rf]);
 
   useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.code === 'Escape') setConnMenu(null); };
+    const h = (e: KeyboardEvent) => { if (isMainWindowActive() && e.code === 'Escape') setConnMenu(null); };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
   }, []);
@@ -91,10 +93,7 @@ function Canvas() {
   return (
     <div className="relative flex-1 min-w-0 bg-ink-950" data-vn-canvas>
       <style>{CHROME_CSS}</style>
-      {s.preview ? (
-        <StagePreview />
-      ) : (
-        <ReactFlow
+      <ReactFlow
           nodes={nodes}
           edges={edges}
           onNodesChange={s.onNodesChange}
@@ -153,8 +152,7 @@ function Canvas() {
             />
           )}
           <Controls showInteractive={false} position="bottom-left" />
-        </ReactFlow>
-      )}
+      </ReactFlow>
 
       {connMenu && (
         <div
@@ -212,6 +210,10 @@ function Shell() {
   const s = useStore();
   const accent = useStore(st => st.director.accent);
   const volume = useStore(st => st.director.volume);
+  const selectedNode = s.scene()?.nodes.some(node => node.selected) ?? false;
+  const hasInspectorSelection = selectedNode || !!s.selectedCharId;
+  const [closeState, setCloseState] = useState<'idle' | 'confirm' | 'shutting'>('idle');
+  const [closeError, setCloseError] = useState('');
 
   useEffect(() => {
     document.documentElement.style.setProperty('--accent', accent);
@@ -222,7 +224,63 @@ function Shell() {
   }, [volume]);
 
   useEffect(() => {
+    if (hasInspectorSelection) s.setRightOpen(true);
+  }, [hasInspectorSelection]);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let alive = true;
+    const listenForClose = async () => {
+      if (!(window as any).__TAURI_INTERNALS__) return;
+      try {
+        const { getCurrentWindow } = await import('@tauri-apps/api/window');
+        const current = getCurrentWindow();
+        const cleanup = await current.onCloseRequested(event => {
+          event.preventDefault();
+          setCloseState(state => state === 'shutting' ? state : 'confirm');
+        });
+        if (alive) unlisten = cleanup;
+        else cleanup();
+      } catch (error) {
+        console.error('Не удалось подключить обработчик закрытия окна', error);
+      }
+    };
+    void listenForClose();
+    return () => { alive = false; unlisten?.(); };
+  }, []);
+
+  const finishClose = async (saveChanges: boolean) => {
+    if (closeState === 'shutting') return;
+    setCloseError('');
+    if (saveChanges && !useStore.getState().save()) {
+      setCloseError('Не удалось сохранить проект. Проверьте свободное место в хранилище и повторите попытку.');
+      setCloseState('confirm');
+      return;
+    }
+
+    setCloseState('shutting');
+    activateMainWindow();
+    const endpoint = (useStore.getState().director.aiEndpoint || 'http://127.0.0.1:8765').replace(/\\/+$/, '');
+    try {
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 2500);
+      await fetch(endpoint + '/shutdown', { method: 'POST', signal: controller.signal });
+      window.clearTimeout(timeout);
+    } catch {
+      // The AI server may be remote or already stopped; close the editor anyway.
+    }
+
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('exit_app');
+    } catch {
+      window.close();
+    }
+  };
+
+  useEffect(() => {
     const h = (e: KeyboardEvent) => {
+      if (!isMainWindowActive() || closeState !== 'idle') return;
       const el = e.target as HTMLElement;
       const typing = el?.tagName === 'INPUT' || el?.tagName === 'TEXTAREA' || el?.tagName === 'SELECT' || el?.isContentEditable;
       const st = () => useStore.getState();
@@ -251,23 +309,28 @@ function Shell() {
     };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
-  }, []);
+  }, [closeState]);
 
   if (!s.activeProjectId) return <Launcher />;
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-ink-950 text-paper overflow-hidden">
+    <div
+      className="h-screen w-screen flex flex-col bg-ink-950 text-paper overflow-hidden"
+      onPointerDownCapture={() => activateMainWindow()}
+    >
       <Toolbar />
       <div className="flex-1 min-h-0 flex">
         <Sidebar />
         <Canvas />
-        <Inspector />
+        {hasInspectorSelection && <Inspector />}
       </div>
+      <StagePreview />
       <DirectorConsole />
       <PaletteDragGhost />
       <Toasts />
       <LlmChat />
       <CompileDialog open={s.compileOpen} onClose={() => s.setCompileOpen(false)} />
+      <CompiledPreviewWindow open={s.compiledPreviewOpen} onClose={() => s.setCompiledPreviewOpen(false)} />
       
       {s.playOverlay && (
         <div className="fixed inset-0 z-[80] bg-ink-950">
@@ -287,6 +350,36 @@ function Shell() {
           >
             <X size={13} /> Закрыть предпросмотр
           </button>
+        </div>
+      )}
+      {closeState !== 'idle' && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-[#07080c] p-5">
+          {closeState === 'confirm' ? (
+            <div className="w-full max-w-[460px] rounded-2xl border border-ink-600 bg-ink-900 p-6 shadow-2xl space-y-4">
+              <div className="font-display font-bold text-[16px]">Закрыть VN Studio?</div>
+              <p className="text-[12px] leading-relaxed text-mute">
+                Выберите, что сделать с изменениями текущего проекта перед завершением работы.
+              </p>
+              {closeError && <div className="rounded-lg border border-danger/50 bg-danger/10 p-2 text-[11px] text-danger">{closeError}</div>}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button className="btn btn-primary justify-center py-3" onClick={() => void finishClose(true)}>
+                  <Save size={13} /> Сохранить несохранённое
+                </button>
+                <button className="btn btn-danger justify-center py-3" onClick={() => void finishClose(false)}>
+                  <X size={13} /> Не сохранять несохранённое
+                </button>
+              </div>
+              <button className="w-full text-[11px] text-mute hover:text-paper py-1" onClick={() => setCloseState('idle')}>
+                Вернуться к работе
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center gap-4 text-center">
+              <Loader2 size={34} className="animate-spin" style={{ color: 'var(--accent)' }} />
+              <div className="font-display font-bold text-[18px] tracking-wide">Завершение работы</div>
+              <div className="text-[12px] text-mute">Останавливаем AI-сервер и закрываем редактор…</div>
+            </div>
+          )}
         </div>
       )}
     </div>
