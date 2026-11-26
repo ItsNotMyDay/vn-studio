@@ -87,7 +87,7 @@ def safe_extract_zip(archive: zipfile.ZipFile, destination: Path) -> Path:
 
 class AudioRuntime:
     def __init__(self, base_dir: str | Path | None = None, port: int = DEFAULT_AUDIO_PORT):
-        default_dir = Path(__file__).resolve().parent / "audio-runtime"
+        default_dir = Path(os.environ.get("VN_AUDIO_RUNTIME_DIR") or (Path(__file__).resolve().parent / "audio-runtime"))
         self.base_dir = Path(base_dir or default_dir).resolve()
         self.repo_dir = self.base_dir / "ACE-Step-1.5"
         self.generated_dir = self.base_dir / "generated"
