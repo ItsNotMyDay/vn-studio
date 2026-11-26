@@ -171,6 +171,10 @@ function runtime(G: any) {
       inner.className = 'ent-in' + (e.effect && e.effect !== 'none' ? ' fx-' + e.effect : '');
       inner.style.animationDuration = e.duration + 's';
       if (e.hiding) inner.style.animationDirection = 'reverse';
+      const content = doc.createElement('div');
+      content.style.height = '100%';
+      content.style.transform = 'rotate(' + (e.rotation == null ? 0 : e.rotation) + 'deg) scaleX(' + ((e.widthScale == null ? 100 : e.widthScale) / 100) + ')';
+      content.style.transformOrigin = 'bottom center';
       const c = e.kind === 'character' ? charById(e.refId) : null;
       if (e.kind === 'sprite' && e.spriteType === 'text') {
         const text = doc.createElement('div');
@@ -183,7 +187,7 @@ function runtime(G: any) {
         text.style.color = e.textColor || '#f4ead8';
         text.style.background = e.backgroundColor || 'transparent';
         text.style.opacity = String((e.opacity == null ? 100 : e.opacity) / 100);
-        inner.appendChild(text);
+        content.appendChild(text);
       } else if (e.kind === 'sprite' && e.spriteType === 'geometry') {
         const ns = 'http://www.w3.org/2000/svg';
         const svg = doc.createElementNS(ns, 'svg');
@@ -198,14 +202,15 @@ function runtime(G: any) {
         else { shape.setAttribute('x','8'); shape.setAttribute('y','8'); shape.setAttribute('width','84'); shape.setAttribute('height','84'); }
         shape.setAttribute('fill', e.fillColor || (shapeName === 'line' ? 'none' : 'none'));
         shape.setAttribute('stroke', e.strokeColor || '#f4ead8'); shape.setAttribute('stroke-width','3');
-        svg.appendChild(shape); inner.appendChild(svg);
+        svg.appendChild(shape); content.appendChild(svg);
       } else {
         const url = e.kind === 'character' ? assetUrl(c && c.sprites && c.sprites[e.expression]) : assetUrl(e.assetId);
         const img = doc.createElement('img');
         img.src = url || (c ? spriteSVG(c, e.expression) : '');
         img.alt = '';
-        inner.appendChild(img);
+        content.appendChild(img);
       }
+      inner.appendChild(content);
       wrap.appendChild(inner);
       entLayer.appendChild(wrap);
     });
@@ -293,6 +298,8 @@ function runtime(G: any) {
       x: d.x != null ? d.x : (prev ? prev.x : 50),
       y: d.y != null ? d.y : (prev ? prev.y : 74),
       scale: d.scale != null ? d.scale : (prev ? prev.scale : 100),
+      widthScale: d.widthScale != null ? d.widthScale : (prev ? prev.widthScale : 100),
+      rotation: d.rotation != null ? d.rotation : (prev ? prev.rotation : 0),
       expression: d.expression || (prev ? prev.expression : 'neutral'),
       effect: fx, moveEase: d.action === 'move' ? (d.fxMove || 'ease-out') : null,
       duration: d.duration || 0.6,
