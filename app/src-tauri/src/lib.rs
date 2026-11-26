@@ -403,6 +403,25 @@ fn run_setup_command(
     Ok(())
 }
 
+fn python_runtime_version(python: &Path) -> Option<String> {
+    let output = Command::new(python)
+        .args(["-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn python_cuda_available(python: &Path) -> bool {
+    Command::new(python)
+        .args(["-c", "import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)"])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
 fn read_log_tail(path: &Path) -> String {
     fs::read_to_string(path)
         .map(|contents| {
@@ -468,54 +487,56 @@ fn install_and_start_ai_server(
     ];
 
     let installed_revision = fs::read_to_string(&marker_path).unwrap_or_default();
-    let dependencies_ready = installed_revision.trim() == AI_SERVER_REVISION && python_exe.is_file();
+    let install_marker = format!("{}|python=3.11|torch=2.7.1|backend=auto", AI_SERVER_REVISION);
+    let dependencies_ready = installed_revision.trim() == install_marker
+        && python_runtime_version(&python_exe).as_deref() == Some("3.11");
 
-    if !dependencies_ready {
-        let python_install_args = vec![
-            "python".to_string(),
-            "install".to_string(),
-            "3.12".to_string(),
+    // Keep one managed interpreter for the app, but isolate server and ACE-Step
+    // packages in their own virtual environments.
+    let python_install_args = vec![
+        "python".to_string(),
+        "install".to_string(),
+        "3.11".to_string(),
+    ];
+    run_setup_command(
+        &app,
+        &uv_exe,
+        &python_install_args,
+        &root,
+        &environment,
+        "Подготовка общего Python 3.11",
+        0.24,
+        &log_path,
+    )?;
+
+    if python_runtime_version(&python_exe).as_deref() != Some("3.11") && venv_dir.exists() {
+        fs::remove_dir_all(&venv_dir)
+            .map_err(|error| format!("Не удалось заменить старое окружение Python: {error}"))?;
+    }
+    if !python_exe.is_file() {
+        let venv_args = vec![
+            "venv".to_string(),
+            "--python".to_string(),
+            "3.11".to_string(),
+            "--seed".to_string(),
+            venv_dir.to_string_lossy().to_string(),
         ];
         run_setup_command(
             &app,
             &uv_exe,
-            &python_install_args,
+            &venv_args,
             &root,
             &environment,
-            "Установка Python 3.12",
-            0.28,
+            "Создание изолированного окружения AI-сервера",
+            0.38,
             &log_path,
         )?;
+    }
+    if python_runtime_version(&python_exe).as_deref() != Some("3.11") {
+        return Err("Не удалось подготовить общее окружение Python 3.11 для VN Studio.".to_string());
+    }
 
-        if !python_exe.is_file() {
-            // Recover from an interrupted venv creation instead of retrying into a partial directory.
-            if venv_dir.exists() {
-                fs::remove_dir_all(&venv_dir)
-                    .map_err(|error| format!("Не удалось очистить неполное окружение Python: {error}"))?;
-            }
-            let venv_args = vec![
-                "venv".to_string(),
-                "--python".to_string(),
-                "3.12".to_string(),
-                "--seed".to_string(),
-                venv_dir.to_string_lossy().to_string(),
-            ];
-            run_setup_command(
-                &app,
-                &uv_exe,
-                &venv_args,
-                &root,
-                &environment,
-                "Создание окружения Python",
-                0.42,
-                &log_path,
-            )?;
-        }
-
-        if !python_exe.is_file() {
-            return Err("Python 3.12 не удалось подготовить в окружении VN Studio.".to_string());
-        }
-
+    if !dependencies_ready {
         let requirements = source_dir.join("requirements.txt");
         let install_args = vec![
             "pip".to_string(),
@@ -531,11 +552,73 @@ fn install_and_start_ai_server(
             &install_args,
             &source_dir,
             &environment,
-            "Установка зависимостей AI-сервера",
-            0.54,
+            "Установка базовых зависимостей AI-сервера",
+            0.52,
             &log_path,
         )?;
+    }
 
+    // uv queries the actual GPU/driver and selects a compatible CUDA, ROCm,
+    // Intel XPU, or CPU wheel set. Pin the framework versions used by the app.
+    let torch_args = vec![
+        "pip".to_string(),
+        "install".to_string(),
+        "--python".to_string(),
+        python_exe.to_string_lossy().to_string(),
+        "--torch-backend=auto".to_string(),
+        "torch==2.7.1".to_string(),
+        "torchvision==0.22.1".to_string(),
+    ];
+    run_setup_command(
+        &app,
+        &uv_exe,
+        &torch_args,
+        &root,
+        &environment,
+        "Подбор и установка PyTorch под оборудование ПК",
+        0.62,
+        &log_path,
+    )?;
+
+    if python_cuda_available(&python_exe) {
+        let quantization_args = vec![
+            "pip".to_string(),
+            "install".to_string(),
+            "--python".to_string(),
+            python_exe.to_string_lossy().to_string(),
+            "bitsandbytes>=0.46".to_string(),
+        ];
+        run_setup_command(
+            &app,
+            &uv_exe,
+            &quantization_args,
+            &root,
+            &environment,
+            "Установка CUDA-библиотек для INT4-квантования",
+            0.72,
+            &log_path,
+        )?;
+    }
+
+    let torch_probe = Command::new(&python_exe)
+        .args([
+            "-c",
+            "import torch, torchvision; "
+                "print('torch=' + str(torch.__version__)); "
+                "print('cuda=' + str(torch.cuda.is_available())); "
+                "print('cuda_runtime=' + str(torch.version.cuda)); "
+                "print('xpu=' + str(hasattr(torch, 'xpu') and torch.xpu.is_available()))",
+        ])
+        .output()
+        .map_err(|error| format!("Не удалось проверить PyTorch: {error}"))?;
+    if !torch_probe.status.success() {
+        return Err(format!(
+            "PyTorch не прошёл проверку после установки.\n{}",
+            String::from_utf8_lossy(&torch_probe.stderr)
+        ));
+    }
+    if let Ok(mut log) = OpenOptions::new().create(true).append(true).open(&log_path) {
+        let _ = log.write_all(&torch_probe.stdout);
     }
 
     emit_setup_progress(
@@ -572,6 +655,7 @@ fn install_and_start_ai_server(
         .env("VN_MODELS_DIR", &models_dir)
         .env("VN_EMBED_PATH", models_dir.join("e5-small"))
         .env("VN_AUDIO_RUNTIME_DIR", &audio_dir)
+        .env("VN_QUANTIZED_MODELS_DIR", root.join("quantized-models"))
         .env("VN_SERVER_REVISION", AI_SERVER_REVISION)
         .env("VN_SERVER_HOST", "127.0.0.1")
         .env("VN_SERVER_PORT", port.to_string())
@@ -590,7 +674,7 @@ fn install_and_start_ai_server(
 
     for attempt in 0..120 {
         if local_server_health(port) {
-            fs::write(&marker_path, AI_SERVER_REVISION)
+            fs::write(&marker_path, &install_marker)
                 .map_err(|error| format!("Не удалось сохранить состояние установки: {error}"))?;
             emit_setup_progress(&app, 0.99, "AI-сервер готов", "Локальный API отвечает на /health");
             return Ok(json!({
