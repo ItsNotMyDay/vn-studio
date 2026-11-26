@@ -5,6 +5,7 @@ import io
 import json
 import os
 import glob
+import importlib.metadata
 import shutil
 import threading
 import uuid
@@ -35,6 +36,7 @@ _boot_mark("FastAPI and Pydantic imported")
 
 from compatibility import build_compatibility_report, get_hardware_report
 from audio_runtime import AUDIO_RUNTIME
+from quantization_cache import build_cache_metadata, cache_path, cache_is_valid, save_cache
 _boot_mark("VN Studio server modules imported")
 
 MODEL_ID_DEFAULT = os.environ.get("VN_MODEL_ID", "qwen_image_2.1_turbo_int8_convrot")
@@ -45,6 +47,7 @@ SEARCH_DIRS = list(dict.fromkeys([MODELS_DIR_DEFAULT, os.path.join(os.path.dirna
 LOW_VRAM_GB = float(os.environ.get("VN_LOW_VRAM_GB", "10"))
 TOKENIZER_FALLBACK_REPO = os.environ.get("VN_TOKENIZER_REPO", "Qwen/Qwen-Image")
 LLM_PATH_DEFAULT = os.environ.get("VN_LLM_PATH", "").strip()
+QUANTIZED_MODELS_DIR = os.path.abspath(os.environ.get("VN_QUANTIZED_MODELS_DIR", os.path.join(SERVER_DATA_DIR, "quantized-models")))
 
 app = FastAPI(title="VN Studio local AI server")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -92,6 +95,27 @@ os.makedirs(EMBED_INDEX_DIR, exist_ok=True)
 EMBED_LOCK = threading.RLock()
 EMBED_STATE = {"model": None, "tokenizer": None, "loaded": False, "error": None}
 EMBED_DIM = 384
+
+def _quantization_cache_info(model_path: str, model_kind: str, quantization: str):
+    packages = ["torch", "transformers", "bitsandbytes"]
+    if model_kind == "image":
+        packages.append("diffusers")
+    versions = {}
+    for package in packages:
+        try:
+            versions[package] = importlib.metadata.version(package)
+        except importlib.metadata.PackageNotFoundError:
+            versions[package] = None
+    metadata = build_cache_metadata(model_path, model_kind, quantization, versions)
+    destination = cache_path(QUANTIZED_MODELS_DIR, metadata)
+    return destination, metadata, cache_is_valid(destination, metadata)
+
+
+def _save_quantized_cache(model, destination, metadata, model_kind: str) -> None:
+    def writer(staging):
+        model.save_pretrained(str(staging), safe_serialization=True)
+    save_cache(destination, metadata, writer)
+
 
 def load_embed(path: str):
     _ensure_transformers_ready()
@@ -575,50 +599,83 @@ def load_model(model_id: str, raw_path: str, job: dict, quantization_mode: str =
     component_kwargs = {**explicit, **optional_overrides}
     quant = "none"
     pipe = None
-    if quantization_mode == "int4":
-        if device != "cuda":
-            raise RuntimeError("Режим INT4 сейчас поддерживается для локальной загрузки только через NVIDIA CUDA.")
-        if not os.path.isdir(os.path.join(path, "transformer")):
-            raise RuntimeError("Эта Diffusers-модель не содержит transformer, который можно загрузить в INT4.")
+    cache_dir = None
+    cache_metadata = None
+    cache_hit = False
+    if quantization_mode in ("int4", "fp16"):
+        cache_dir, cache_metadata, cache_hit = _quantization_cache_info(path, "image", quantization_mode)
+
+    if cache_hit:
         try:
-            from diffusers import BitsAndBytesConfig as DBnB
-            from transformers import BitsAndBytesConfig as TBnB
-            job["stage"] = "Квантование transformer в INT4 (NF4)"
-            job["progress"] = 0.2
-            t_cfg = DBnB(load_in_4bit=True, bnb_4bit_quant_type="nf4",
-                         bnb_4bit_compute_dtype=torch.float16, bnb_4bit_use_double_quant=True)
-            kw = dict(component_kwargs)
-            kw["transformer"] = load_component(path, "transformer", index, torch.float16, t_cfg)
-            if os.path.isdir(os.path.join(path, "text_encoder")):
-                try:
-                    e_cfg = TBnB(load_in_4bit=True, bnb_4bit_quant_type="nf4",
-                                 bnb_4bit_compute_dtype=torch.float16)
-                    kw["text_encoder"] = load_component(path, "text_encoder", index, torch.float16, e_cfg)
-                except Exception as exc:
-                    job["warnings"].append("Текстовый энкодер оставлен в исходной точности: " + str(exc)[:180])
-            job["progress"] = 0.7
-            job["stage"] = "Сборка INT4 pipeline"
-            if not compatibility.get("hardware", {}).get("software", {}).get("accelerate", {}).get("available"):
-                raise RuntimeError("Для INT4-квантования Diffusers требуется пакет accelerate.")
-            # Assemble without a forced device_map. The VRAM-aware placement
-            # below decides between full-GPU execution and model CPU offload.
-            pipe = _fp(pipe_cls, path, dtype=torch.float16, **kw)
-            quant = "int4-nf4"
+            job["stage"] = "Загрузка сохранённого квантования из кэша"
+            job["progress"] = 0.34
+            pipe = _fp(pipe_cls, str(cache_dir), dtype=dtype, **component_kwargs)
+            quant = "int4-nf4" if quantization_mode == "int4" else "fp16"
         except Exception as exc:
-            raise RuntimeError(
-                "Не удалось загрузить Diffusers-модель в INT4. Проверьте совместимость transformer и bitsandbytes: "
-                + f"{type(exc).__name__}: {str(exc)[:300]}"
-            ) from exc
-    elif quantization_mode == "fp16":
-        job["stage"] = "Загрузка модели в FP16"
-        job["progress"] = 0.4
-        pipe = _fp(pipe_cls, path, dtype=torch.float16, **component_kwargs)
-        quant = "fp16"
-    else:
-        job["stage"] = "Загрузка без дополнительного квантования (точность весов модели)"
-        job["progress"] = 0.4
-        pipe = _fp(pipe_cls, path, dtype="auto", **component_kwargs)
-        quant = "none"
+            job["warnings"].append(
+                "Сохранённый вариант модели не удалось открыть; пересобираем кэш: "
+                + f"{type(exc).__name__}: {str(exc)[:180]}"
+            )
+            shutil.rmtree(cache_dir, ignore_errors=True)
+            cache_hit = False
+
+    if not cache_hit:
+        if quantization_mode == "int4":
+            if device != "cuda":
+                raise RuntimeError("Режим INT4 сейчас поддерживается для локальной загрузки только через NVIDIA CUDA.")
+            if not os.path.isdir(os.path.join(path, "transformer")):
+                raise RuntimeError("Эта Diffusers-модель не содержит transformer, который можно загрузить в INT4.")
+            try:
+                from diffusers import BitsAndBytesConfig as DBnB
+                from transformers import BitsAndBytesConfig as TBnB
+                job["stage"] = "Квантование transformer в INT4 (NF4)"
+                job["progress"] = 0.2
+                t_cfg = DBnB(load_in_4bit=True, bnb_4bit_quant_type="nf4",
+                             bnb_4bit_compute_dtype=torch.float16, bnb_4bit_use_double_quant=True)
+                kw = dict(component_kwargs)
+                kw["transformer"] = load_component(path, "transformer", index, torch.float16, t_cfg)
+                if os.path.isdir(os.path.join(path, "text_encoder")):
+                    try:
+                        e_cfg = TBnB(load_in_4bit=True, bnb_4bit_quant_type="nf4",
+                                     bnb_4bit_compute_dtype=torch.float16)
+                        kw["text_encoder"] = load_component(path, "text_encoder", index, torch.float16, e_cfg)
+                    except Exception as exc:
+                        job["warnings"].append("Текстовый энкодер оставлен в исходной точности: " + str(exc)[:180])
+                job["progress"] = 0.7
+                job["stage"] = "Сборка INT4 pipeline"
+                if not compatibility.get("hardware", {}).get("software", {}).get("accelerate", {}).get("available"):
+                    raise RuntimeError("Для INT4-квантования Diffusers требуется пакет accelerate.")
+                # Assemble without a forced device_map. The VRAM-aware placement
+                # below decides between full-GPU execution and model CPU offload.
+                pipe = _fp(pipe_cls, path, dtype=torch.float16, **kw)
+                quant = "int4-nf4"
+            except Exception as exc:
+                raise RuntimeError(
+                    "Не удалось загрузить Diffusers-модель в INT4. Проверьте совместимость transformer и bitsandbytes: "
+                    + f"{type(exc).__name__}: {str(exc)[:300]}"
+                ) from exc
+        elif quantization_mode == "fp16":
+            job["stage"] = "Загрузка модели в FP16"
+            job["progress"] = 0.4
+            pipe = _fp(pipe_cls, path, dtype=torch.float16, **component_kwargs)
+            quant = "fp16"
+        else:
+            job["stage"] = "Загрузка без дополнительного квантования (точность весов модели)"
+            job["progress"] = 0.4
+            pipe = _fp(pipe_cls, path, dtype="auto", **component_kwargs)
+            quant = "none"
+
+    if cache_dir is not None and not cache_hit:
+        try:
+            job["stage"] = "Сохранение подготовленной модели в кэш"
+            job["progress"] = 0.80
+            _save_quantized_cache(pipe, cache_dir, cache_metadata, "image")
+            job["warnings"].append("Кэш подготовленной модели сохранён на диск; при следующих запусках повторная конвертация не потребуется.")
+        except Exception as exc:
+            job["warnings"].append(
+                "Не удалось сохранить кэш квантования; модель продолжит работать без кэша: "
+                + f"{type(exc).__name__}: {str(exc)[:180]}"
+            )
     job["progress"] = 0.88
     if device == "cuda":
         model_weight_bytes = int(((compatibility.get("model") or {}).get("weight_bytes") or 0))
@@ -925,7 +982,13 @@ def load_llm(path: str, quantization_mode: str = "none"):
     elif accelerate_available:
         kwargs["device_map"] = "cpu"
 
-    if quantization_mode == "int4" and not use_prequantized:
+    cache_dir = None
+    cache_metadata = None
+    cache_hit = False
+    if quantization_mode in ("int4", "fp16") and not use_prequantized:
+        cache_dir, cache_metadata, cache_hit = _quantization_cache_info(path, "llm", quantization_mode)
+
+    if quantization_mode == "int4" and not use_prequantized and not cache_hit:
         try:
             from transformers import BitsAndBytesConfig
             kwargs["quantization_config"] = BitsAndBytesConfig(
@@ -946,16 +1009,47 @@ def load_llm(path: str, quantization_mode: str = "none"):
         quantization=applied_quantization,
     )
 
-    try:
+    def _load_model_from(source_path, load_kwargs):
         try:
-            model = model_cls.from_pretrained(path, **kwargs)
+            return model_cls.from_pretrained(source_path, **load_kwargs)
         except TypeError:
-            if "dtype" in kwargs:
-                kwargs["torch_dtype"] = kwargs.pop("dtype")
-            model = model_cls.from_pretrained(path, **kwargs)
+            fallback_kwargs = dict(load_kwargs)
+            if "dtype" not in fallback_kwargs:
+                raise
+            fallback_kwargs["torch_dtype"] = fallback_kwargs.pop("dtype")
+            return model_cls.from_pretrained(source_path, **fallback_kwargs)
+
+    try:
+        source_path = str(cache_dir) if cache_hit else path
+        if cache_hit:
+            print(f"[quant-cache] Loading {quantization_mode} LLM from {source_path}", flush=True)
+        try:
+            model = _load_model_from(source_path, kwargs)
+        except Exception as cache_error:
+            if not cache_hit:
+                raise
+            print(f"[quant-cache] Cached LLM could not be loaded ({cache_error}); rebuilding it", flush=True)
+            shutil.rmtree(cache_dir, ignore_errors=True)
+            cache_hit = False
+            if quantization_mode == "int4" and not use_prequantized:
+                from transformers import BitsAndBytesConfig
+                kwargs["quantization_config"] = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_quant_type="nf4",
+                    bnb_4bit_compute_dtype=compute_dtype,
+                    bnb_4bit_use_double_quant=True,
+                )
+            model = _load_model_from(path, kwargs)
+
         if device in ("cpu", "cuda", "mps", "xpu") and "device_map" not in kwargs:
             model = model.to(device)
         model.eval()
+        if cache_dir is not None and not cache_hit:
+            try:
+                print(f"[quant-cache] Saving {quantization_mode} LLM to {cache_dir}", flush=True)
+                _save_quantized_cache(model, cache_dir, cache_metadata, "llm")
+            except Exception as cache_error:
+                print(f"[quant-cache] Could not persist LLM cache: {cache_error}", flush=True)
         with LLM_LOCK:
             LLM_STATE.update(
                 model=model, tokenizer=tokenizer, processor=processor, loaded=True,
