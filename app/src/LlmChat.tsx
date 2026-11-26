@@ -50,7 +50,9 @@ function sceneToText(sc: any, project: any): string {
   return [`Текущая сцена: «${sc.name}».`, 'Реплики сцены:\n' + (lines.join('\n') || '  (пусто)'), 'Персонажи проекта:\n' + chars, `Фоны: ${bgs.join(', ') || '—'}. Музыка: ${trs.join(', ') || '—'}.`].join('\n');
 }
 
-export function LlmChat() {
+interface LlmChatProps { open: boolean; onOpenChange: (open: boolean) => void; }
+
+export function LlmChat({ open: isOpen, onOpenChange: setIsOpen }: LlmChatProps) {
   const s = useStore();
   const endpoint = normalizeEndpoint(s.director.aiEndpoint);
   const [aiCfg, setAiCfg] = useState<AiSettings>(loadAiSettings());
@@ -64,7 +66,6 @@ export function LlmChat() {
   const [quantizationOpen, setQuantizationOpen] = useState(false);
   const [loadProg, setLoadProg] = useState<{ p: number; stage: string }>({ p: 0, stage: '' });
   const [status, setStatus] = useState<LlmStatus>({ online: false, loaded: false });
-  const [isOpen, setIsOpen] = useState(false);
   const [ctxMode, setCtxMode] = useState<'scene' | 'node' | 'off'>('scene');
   const [focusNodeId, setFocusNodeId] = useState('');
   const [ragCount, setRagCount] = useState(0);
@@ -283,16 +284,7 @@ export function LlmChat() {
     push('Изменения на холсте отменены (один шаг undo).');
   };
 
-  const dotColor = !status.online ? '#ff5470' : status.loaded ? '#9dff57' : '#ffb454';
-
-  if (!isOpen) {
-    return (
-      <button className="fixed bottom-4 right-4 z-[60] btn btn-primary !px-3 !py-2 shadow-2xl" onClick={() => setIsOpen(true)} title="AI-консультант">
-        <span className="w-2 h-2 rounded-full" style={{ background: dotColor, boxShadow: `0 0 8px ${dotColor}` }} />
-        <MessageSquare size={16} /> Консультант
-      </button>
-    );
-  }
+  if (!isOpen) return null;
 
   return (
     <FloatingWindow id="ai-consultant" title="AI-консультант" open={isOpen} onClose={() => setIsOpen(false)} width={460} height={600}>

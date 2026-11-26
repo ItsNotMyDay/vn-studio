@@ -1,9 +1,75 @@
 import { useEffect, useRef, useState } from 'react';
-import { Maximize2, Minimize2, X } from 'lucide-react';
+import { Copy, Minus, Square, X } from 'lucide-react';
 import { activateFloatingWindow, closeFloatingWindow, isFloatingWindowActive } from './windowFocus';
 
 let nextZIndex = 140;
 let nextOffset = 0;
+
+type MinimizedWindowItem = {
+  id: string;
+  title: string;
+  restore: () => void;
+  close?: () => void;
+};
+
+let minimizedWindows: MinimizedWindowItem[] = [];
+const minimizedWindowListeners = new Set<(items: MinimizedWindowItem[]) => void>();
+
+function publishMinimizedWindows() {
+  const snapshot = [...minimizedWindows];
+  minimizedWindowListeners.forEach(listener => listener(snapshot));
+}
+
+function addMinimizedWindow(item: MinimizedWindowItem) {
+  minimizedWindows = [...minimizedWindows.filter(existing => existing.id !== item.id), item];
+  publishMinimizedWindows();
+}
+
+function removeMinimizedWindow(id: string) {
+  const next = minimizedWindows.filter(item => item.id !== id);
+  if (next.length === minimizedWindows.length) return;
+  minimizedWindows = next;
+  publishMinimizedWindows();
+}
+
+export function FloatingWindowDock() {
+  const [items, setItems] = useState<MinimizedWindowItem[]>([]);
+  useEffect(() => {
+    const listener = (next: MinimizedWindowItem[]) => setItems(next);
+    minimizedWindowListeners.add(listener);
+    listener(minimizedWindows);
+    return () => { minimizedWindowListeners.delete(listener); };
+  }, []);
+
+  if (!items.length) return null;
+  return (
+    <div className="pointer-events-none absolute bottom-3 left-1/2 z-[125] max-w-[calc(100%-24px)] -translate-x-1/2">
+      <div className="pointer-events-auto flex max-w-full items-center gap-1.5 overflow-x-auto rounded-xl border border-ink-600 bg-ink-950/95 p-1.5 shadow-2xl backdrop-blur-md">
+        {items.map(item => (
+          <div key={item.id} className="inline-flex max-w-[220px] shrink-0 items-center gap-1 rounded-lg border border-ink-700 bg-ink-900 pl-2">
+            <button
+              className="min-w-0 truncate py-1.5 text-left text-[11px] font-medium text-paper hover:text-[var(--accent)]"
+              onClick={item.restore}
+              title={`Развернуть: ${item.title}`}
+            >
+              {item.title}
+            </button>
+            {item.close && (
+              <button
+                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-mute transition-colors hover:bg-red-500/15 hover:text-red-300"
+                onClick={item.close}
+                title={`Закрыть: ${item.title}`}
+                aria-label={`Закрыть ${item.title}`}
+              >
+                <X size={12} />
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 interface FloatingWindowProps {
   id: string;
@@ -35,9 +101,15 @@ export function FloatingWindow({
   }, [width, height]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      removeMinimizedWindow(id);
+      return;
+    }
     if (!minimized) bringToFront();
-    return () => closeFloatingWindow(id);
+    return () => {
+      closeFloatingWindow(id);
+      removeMinimizedWindow(id);
+    };
   }, [open]);
 
   useEffect(() => {
@@ -91,30 +163,31 @@ export function FloatingWindow({
   };
 
   const restore = () => {
+    removeMinimizedWindow(id);
     setMinimized(false);
     bringToFront();
   };
 
-  if (!open) return null;
+  const minimize = () => {
+    setMinimized(true);
+    closeFloatingWindow(id);
+    addMinimizedWindow({
+      id,
+      title,
+      restore,
+      close: onClose ? () => {
+        removeMinimizedWindow(id);
+        onClose();
+      } : undefined,
+    });
+  };
 
-  if (minimized) {
-    return (
-      <div
-        className="fixed flex items-center gap-2 panel border border-ink-500 rounded-xl px-2.5 py-2 shadow-2xl"
-        style={{ left: Math.max(8, Math.min(position.left, window.innerWidth - 240)), top: Math.max(8, Math.min(position.top, window.innerHeight - 46)), width: 232, zIndex }}
-        onPointerDown={bringToFront}
-      >
-        <span className="flex-1 truncate text-[11px] font-semibold">{title}</span>
-        <button className="btn !px-1.5 !py-1" title="Развернуть окно" onClick={restore}><Maximize2 size={12} /></button>
-        {onClose && <button className="btn !px-1.5 !py-1" title="Закрыть окно" onClick={onClose}><X size={12} /></button>}
-      </div>
-    );
-  }
+  if (!open || minimized) return null;
 
   return (
     <div
       ref={rootRef}
-      className="fixed z-[140] min-w-0"
+      className="fixed z-[140] flex min-w-0 flex-col overflow-hidden rounded-xl border border-ink-600 bg-ink-950 shadow-2xl"
       style={{
         left: maximized ? 8 : position.left,
         top: maximized ? 8 : position.top,
@@ -129,17 +202,41 @@ export function FloatingWindow({
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
     >
-      <div className="absolute top-2 right-12 z-[160] flex items-center gap-1">
-        <button className="btn !px-1.5 !py-1 shadow-lg" title="Свернуть окно" onClick={() => { setMinimized(true); closeFloatingWindow(id); }}>
-          <Minimize2 size={12} />
+      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-ink-700 bg-[#0e1220] px-2">
+        <div data-floating-handle className="h-full min-w-0 flex-1 cursor-move" title={title} aria-label={`Переместить окно: ${title}`} />
+        <button
+          type="button"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-mute transition-colors hover:bg-ink-800 hover:text-paper focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--accent)]"
+          title="Свернуть"
+          aria-label="Свернуть окно"
+          onClick={minimize}
+        >
+          <Minus size={15} strokeWidth={1.8} />
         </button>
-        <button className="btn !px-1.5 !py-1 shadow-lg" title={maximized ? "Восстановить размер" : "Развернуть на весь экран"} onClick={maximize}>
-          <Maximize2 size={12} />
+        <button
+          type="button"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-mute transition-colors hover:bg-ink-800 hover:text-paper focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--accent)]"
+          title={maximized ? "Вернуть оконный режим" : "На весь экран"}
+          aria-label={maximized ? "Вернуть оконный режим" : "На весь экран"}
+          onClick={maximize}
+        >
+          {maximized ? <Copy size={14} strokeWidth={1.8} /> : <Square size={14} strokeWidth={1.8} />}
         </button>
+        {onClose && (
+          <button
+            type="button"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-mute transition-colors hover:bg-red-500/15 hover:text-red-300 focus-visible:outline focus-visible:outline-1 focus-visible:outline-red-400"
+            title="Закрыть"
+            aria-label="Закрыть окно"
+            onClick={onClose}
+          >
+            <X size={15} strokeWidth={1.8} />
+          </button>
+        )}
       </div>
       <div
-        className={`vn-floating-content min-w-0 max-h-[calc(100vh-16px)] overflow-auto rounded-xl shadow-2xl ${maximized ? 'vn-floating-maximized' : ''}`}
-        style={maximized ? { height: '100%' } : undefined}
+        className={`vn-floating-content min-h-0 min-w-0 flex-1 overflow-auto ${maximized ? 'vn-floating-maximized' : ''}`}
+        style={maximized ? { height: '100%' } : { maxHeight: 'calc(100vh - 52px)' }}
       >
         {children}
       </div>

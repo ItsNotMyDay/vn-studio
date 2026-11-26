@@ -245,7 +245,7 @@ function SpriteThumb({ c, expr, big = false }: any) {
 
 /* ---------------------------------- toolbar -------------------------------- */
 
-export function Toolbar() {
+export function Toolbar({ onOpenConsultant, consultantOpen = false }: { onOpenConsultant?: () => void; consultantOpen?: boolean }) {
   const s = useStore();
   const issues = s.issues();
   const [showIssues, setShowIssues] = useState(false);
@@ -300,6 +300,16 @@ export function Toolbar() {
       >
         <Settings size={14} />
       </button>
+      {onOpenConsultant && (
+        <button
+          className="btn"
+          style={consultantOpen ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : {}}
+          onClick={onOpenConsultant}
+          title="AI-консультант"
+        >
+          <MessageSquare size={14} />
+        </button>
+      )}
       <button className="btn" onClick={s.toggleMute} title="Звук">
         {s.muted ? <VolumeX size={14} className="text-danger" /> : <Volume2 size={14} className="text-lime" />}
       </button>

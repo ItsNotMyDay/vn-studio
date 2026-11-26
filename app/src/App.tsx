@@ -10,7 +10,7 @@ import { nodeTypes } from './nodes';
 import { StagePreview } from './StagePreview';
 import { CompiledPreviewWindow } from './CompiledPreviewWindow';
 import { Stage } from './stage';
-import { FloatingWindow } from './FloatingWindow';
+import { FloatingWindow, FloatingWindowDock } from './FloatingWindow';
 import { activateMainWindow, isMainWindowActive } from './windowFocus';
 import { LlmChat } from './LlmChat';
 import { Launcher } from './Launcher';
@@ -155,6 +155,7 @@ function Canvas() {
           )}
           <Controls showInteractive={false} position="bottom-left" />
       </ReactFlow>
+      <FloatingWindowDock />
 
       {connMenu && (
         <div
@@ -215,6 +216,7 @@ function Shell() {
   const selectedNode = s.scene()?.nodes.some(node => node.selected) ?? false;
   const hasInspectorSelection = selectedNode || !!s.selectedCharId;
   const [closeState, setCloseState] = useState<'idle' | 'confirm' | 'shutting'>('idle');
+  const [consultantOpen, setConsultantOpen] = useState(false);
   const [closeError, setCloseError] = useState('');
 
   useEffect(() => {
@@ -320,7 +322,7 @@ function Shell() {
     >
       {s.activeProjectId ? (
         <>
-      <Toolbar />
+      <Toolbar onOpenConsultant={() => setConsultantOpen(true)} consultantOpen={consultantOpen} />
       <div className="flex-1 min-h-0 flex">
         <Sidebar />
         <Canvas />
@@ -330,7 +332,7 @@ function Shell() {
       <DirectorConsole />
       <PaletteDragGhost />
       <Toasts />
-      <LlmChat />
+      <LlmChat open={consultantOpen} onOpenChange={setConsultantOpen} />
       <CompileDialog open={s.compileOpen} onClose={() => s.setCompileOpen(false)} />
       <CompiledPreviewWindow open={s.compiledPreviewOpen} onClose={() => s.setCompiledPreviewOpen(false)} />
       
