@@ -170,7 +170,6 @@ export function StagePreview() {
     const widthScale = ent.widthScale ?? 100;
     const wpx = Math.max(24, (item?.offsetWidth ?? 24) * widthScale / Math.max(10, ent.scale));
     const rotation = ent.rotation ?? 0;
-    const angle = rotation * Math.PI / 180;
     const centerX = rect.left + (ent.x / 100) * rect.width;
     const centerY = rect.top + (ent.y / 100) * rect.height - hpx / 2;
     const pointerAngle = Math.atan2(e.clientY - centerY, e.clientX - centerX);
