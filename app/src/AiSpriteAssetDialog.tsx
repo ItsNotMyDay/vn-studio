@@ -386,6 +386,7 @@ export function AiSpriteAssetDialog({ open, onClose }: { open: boolean; onClose:
 
       <QuantizationDialog
         open={quantizationOpen}
+        windowId="quantization-sprite-assets"
         modelName={cfg.modelId}
         onClose={() => { setQuantizationOpen(false); setPendingSeed(undefined); }}
         onSelect={mode => {
