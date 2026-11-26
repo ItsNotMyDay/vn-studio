@@ -6,7 +6,10 @@ set "ROOT_DIR=%~dp0"
 set "AI_DIR=%ROOT_DIR%ai-server"
 set "APP_DIR=%ROOT_DIR%app"
 set "PYTHON_PATH=%AI_DIR%\python312\python.exe"
-set "APP_EXE=%APP_DIR%\src-tauri\target\release\vn-studio.exe"
+:: Cargo package name is "app", so this is the actual Tauri release binary.
+set "APP_EXE=%APP_DIR%\src-tauri\target\release\app.exe"
+if not exist "%APP_EXE%" if exist "%APP_DIR%\src-tauri\target\release\vn-studio.exe" set "APP_EXE=%APP_DIR%\src-tauri\target\release\vn-studio.exe"
+set "APP_LAUNCHED=0"
 
 :: Логирование
 echo [%date% %time%] Старт launcher.bat > "%ROOT_DIR%launcher.log"
@@ -34,12 +37,12 @@ set "VN_EMBED_PATH=C:\models\e5-small"
 if not defined VN_SERVER_HOST set "VN_SERVER_HOST=127.0.0.1"
 if not defined VN_SERVER_PORT set "VN_SERVER_PORT=8765"
 
-:: Сначала проверяем существующий сервер: не создаём второй процесс и не ждём лишний раз.
+:: Проверяем, не работает ли сервер уже.
 echo Проверка уже запущенного AI-сервера... >> "%ROOT_DIR%launcher.log"
 call :check_health
 if not errorlevel 1 goto server_ready
 
-:: Запуск AI-сервера в отдельном свернутом окне.
+:: Запускаем AI-сервер в отдельном свернутом окне.
 echo Запуск AI-сервера... >> "%ROOT_DIR%launcher.log"
 echo VN_MODEL_PATH=%VN_MODEL_PATH% >> "%ROOT_DIR%launcher.log"
 echo VN_LLM_PATH=%VN_LLM_PATH% >> "%ROOT_DIR%launcher.log"
@@ -48,6 +51,14 @@ echo VN_EMBED_PATH=%VN_EMBED_PATH% >> "%ROOT_DIR%launcher.log"
 pushd "%AI_DIR%"
 start "VN Studio AI Server" /min cmd /c ""%PYTHON_PATH%" -m uvicorn server:app --host %VN_SERVER_HOST% --port %VN_SERVER_PORT% >> "%ROOT_DIR%ai-server.log" 2>&1"
 popd
+
+:: Не заставляем пользователя ждать холодного импорта Python: UI запускается параллельно.
+:: Release binary is app.exe because Cargo.toml package name is "app".
+if /I not "%VN_SERVER_ONLY%"=="1" if exist "%APP_EXE%" (
+    echo Запуск Release приложения параллельно с AI-сервером: %APP_EXE% >> "%ROOT_DIR%launcher.log"
+    start "" "%APP_EXE%"
+    set "APP_LAUNCHED=1"
+)
 
 :: Проверяем готовность сразу, затем раз в секунду (всего до 60 секунд).
 echo Ожидание готовности сервера... >> "%ROOT_DIR%launcher.log"
@@ -74,14 +85,17 @@ if /I "%VN_SERVER_ONLY%"=="1" (
     exit /b 0
 )
 
-:: Если приложение уже собрано, запускаем готовый exe без Vite и компиляции Rust.
+if "%APP_LAUNCHED%"=="1" goto app_started
+
+:: Сервер мог быть запущен до открытия лаунчера — в этом случае тоже открываем Release exe.
 if exist "%APP_EXE%" (
-    echo Запуск готового приложения: %APP_EXE% >> "%ROOT_DIR%launcher.log"
+    echo Запуск готового Release приложения: %APP_EXE% >> "%ROOT_DIR%launcher.log"
     start "" "%APP_EXE%"
+    set "APP_LAUNCHED=1"
     goto app_started
 )
 
-:: Резервный режим для разработчика, если release exe еще не собран.
+:: Release exe отсутствует — оставляем удобный резервный режим разработчика.
 echo Release exe не найден. Запуск Tauri в режиме разработки... >> "%ROOT_DIR%launcher.log"
 cd /d "%APP_DIR%"
 call npm run tauri dev >> "%ROOT_DIR%launcher.log" 2>&1
