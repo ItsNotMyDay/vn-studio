@@ -183,12 +183,20 @@ fn local_http_port(endpoint: &str) -> Result<Option<u16>, String> {
 }
 
 async fn server_health_ok(client: &reqwest::Client, endpoint: &str) -> bool {
-    client
+    let Ok(response) = client
         .get(format!("{}/health", endpoint.trim_end_matches('/')))
         .send()
         .await
-        .map(|response| response.status().is_success())
-        .unwrap_or(false)
+    else {
+        return false;
+    };
+    if !response.status().is_success() {
+        return false;
+    }
+    let Ok(payload) = response.json::<Value>().await else {
+        return false;
+    };
+    payload.get("service").and_then(Value::as_str) == Some("vn-studio-ai")
 }
 
 async fn download_to_file(
@@ -559,7 +567,9 @@ fn install_and_start_ai_server(
         .envs(environment.iter().map(|(key, value)| (key, value)))
         .env("VN_SERVER_DATA_DIR", &data_dir)
         .env("VN_MODELS_DIR", &models_dir)
+        .env("VN_EMBED_PATH", models_dir.join("e5-small"))
         .env("VN_AUDIO_RUNTIME_DIR", &audio_dir)
+        .env("VN_SERVER_REVISION", AI_SERVER_REVISION)
         .env("VN_SERVER_HOST", "127.0.0.1")
         .env("VN_SERVER_PORT", port.to_string())
         .env("HF_HOME", &hf_dir)
@@ -620,8 +630,20 @@ fn local_server_health(port: u16) -> bool {
     let Ok(read) = stream.read(&mut response) else {
         return false;
     };
-    let status = String::from_utf8_lossy(&response[..read]);
-    status.starts_with("HTTP/1.1 200") || status.starts_with("HTTP/1.0 200")
+    let response_text = String::from_utf8_lossy(&response[..read]);
+    let Some((headers, body)) = response_text.split_once("\r\n\r\n") else {
+        return false;
+    };
+    let status_ok = headers.starts_with("HTTP/1.1 200")
+        || headers.starts_with("HTTP/1.0 200");
+    if !status_ok {
+        return false;
+    }
+    serde_json::from_str::<Value>(body)
+        .ok()
+        .and_then(|payload| payload.get("service").and_then(Value::as_str).map(str::to_string))
+        .as_deref()
+        == Some("vn-studio-ai")
 }
 
 #[tauri::command]
