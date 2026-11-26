@@ -124,6 +124,7 @@ export function FloatingWindow({
         zIndex,
       }}
       onPointerDownCapture={e => { bringToFront(); startDrag(e as any); }}
+      onFocusCapture={bringToFront}
       onPointerMove={moveDrag}
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
