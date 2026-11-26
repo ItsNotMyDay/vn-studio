@@ -1468,7 +1468,11 @@ export const useStore = create<Store>((set, get) => {
       const backgrounds = get().project.backgrounds;
       const tracks = get().project.tracks;
       const d: any = node.data ?? {};
-      const character = characters.find(c => c.id === d.characterId);
+      const nodeReplies = node.type === 'dialogue' ? getDialogueReplies(d, node.id) : [];
+      const currentReply = nodeReplies.length ? nodeReplies[nodeReplies.length - 1] : null;
+      const currentCharacterId = currentReply?.characterId ?? d.characterId;
+      const character = characters.find(c => c.id === currentCharacterId);
+      const currentEmotion = currentReply?.expression ?? d.expression ?? 'neutral';
       const visited = new Set<string>();
       const queue: string[] = [];
       const startNode = sc.nodes.find(n => n.type === 'start');
@@ -1537,7 +1541,7 @@ export const useStore = create<Store>((set, get) => {
           character_name: character?.name ?? '???',
           character_personality: character?.personality ?? '',
           character_appearance: character?.appearance ?? '',
-          emotion: d.expression ?? 'neutral',
+          emotion: currentEmotion,
           character_vars: character?.vars?.reduce((acc, v) => ({ ...acc, [v.key]: v.value }), {}) ?? {},
         },
         event_history: eventHistory.slice(-15),
