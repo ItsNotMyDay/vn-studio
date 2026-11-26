@@ -23,6 +23,7 @@ import { AiAudioDialog } from './AiAudioDialog';
 import { QuantizationDialog } from './QuantizationDialog';
 import { AudioEditor } from './AudioEditor';
 import { SoundEffectBuilder } from './SoundEffectBuilder';
+import { readProject } from './projects';
 import {
   loadAiSettings, saveAiSettings, aiHealth, llmHealth, embeddingsHealth, embeddingsClear, aiListModels,
   aiLoadJob, llmLoadJob, aiUnloadModel, llmUnload, aiCancelJob,
@@ -289,9 +290,6 @@ export function Toolbar() {
         <Database size={14} /><span className="hidden xl:inline">Индекс главы</span>
       </button>
       <button className="btn" onClick={s.save} title="Сохранить (Ctrl+S)"><Save size={14} /><span className="hidden xl:inline">Сохранить</span></button>
-      <button className="btn btn-primary" onClick={() => s.setCompileOpen(true)} title="Компиляция игры для Windows / Linux / Android">
-        <Package size={14} /> Компилировать
-      </button>
       <button className="btn" onClick={s.exportScript} title="Экспорт сценария в текст"><FileText size={14} /><span className="hidden xl:inline">Сценарий</span></button>
       <button
         className="btn"
@@ -305,9 +303,11 @@ export function Toolbar() {
         {s.muted ? <VolumeX size={14} className="text-danger" /> : <Volume2 size={14} className="text-lime" />}
       </button>
       {s.player.running
-        ? <button className="btn btn-danger" onClick={() => { s.stop(); post({ type: 'stop' }); }}><Square size={14} /> Стоп</button>
-        : <button className="btn btn-primary" onClick={() => launchPlayer(s.currentSceneId)} title="Запустить демо в отдельном окне"><Play size={14} /> Play</button>}
-      <button className="btn" onClick={() => s.setRightOpen(!s.rightOpen)} title="Правая панель"><PanelRight size={14} /></button>
+        ? <button className="btn btn-danger" onClick={() => { s.stop(); post({ type: 'stop' }); }}><Square size={14} /> Стоп ноды</button>
+        : <button className="btn btn-primary" onClick={() => s.setCompiledPreviewOpen(true)} title="Предпросмотр скомпилированной визуальной новеллы"><Play size={14} /> Play</button>}
+      <button className="btn" onClick={() => s.setCompileOpen(true)} title="Компиляция игры для Windows / Linux / Android">
+        <Package size={14} /> Компилировать
+      </button>
     </div>
   );
 }
@@ -321,10 +321,18 @@ export function Sidebar() {
   const [musicAiOpen, setMusicAiOpen] = useState(false);
   const [soundBuilderOpen, setSoundBuilderOpen] = useState(false);
   const q = s.search.toLowerCase();
-  const scenes = useMemo(() => {
-    const list = s.project.scenes.filter(sc => sc.name.toLowerCase().includes(q));
-    return [...list].sort((a, b) => s.sort === 'name' ? a.name.localeCompare(b.name) : b.updatedAt - a.updatedAt);
-  }, [s.project.scenes, q, s.sort]);
+  const scenes = s.project.scenes.filter(sc => sc.name.toLowerCase().includes(q));
+  const savedProject = s.activeProjectId ? readProject(s.activeProjectId) : null;
+  const sceneHasUnsavedChanges = (scene: any) => {
+    const saved = savedProject?.scenes?.find((item: any) => item.id === scene.id);
+    if (!saved) return true;
+    const clean = (value: any) => ({
+      name: value.name,
+      nodes: (value.nodes ?? []).map((node: any) => ({ ...node, selected: false })),
+      edges: (value.edges ?? []).map((edge: any) => ({ ...edge, selected: false })),
+    });
+    return JSON.stringify(clean(scene)) !== JSON.stringify(clean(saved));
+  };
   const chars = s.project.characters.filter(c => c.name.toLowerCase().includes(q));
   const bgs = s.project.backgrounds.filter(b => b.name.toLowerCase().includes(q));
   const trs = s.project.tracks.filter(t => t.name.toLowerCase().includes(q));
@@ -359,19 +367,15 @@ export function Sidebar() {
       </div>
 
       <div className="p-2 space-y-2 border-b border-ink-700">
-        <div className="relative">
-          <Search size={13} className="absolute left-2.5 top-2.5 text-mute" />
-          <input className="input !pl-7" placeholder="Поиск…" value={s.search} onChange={e => s.setSearch(e.target.value)} />
-        </div>
-        {s.leftTab === 'scenes' && (
-          <div className="flex gap-2">
-            <select className="select" value={s.sort} onChange={e => s.setSort(e.target.value as any)}>
-              <option value="updated">Сначала изменённые</option>
-              <option value="name">По имени</option>
-            </select>
-            <button className="btn btn-primary !px-2.5" onClick={s.addScene} title="Новая сцена"><Plus size={14} /></button>
+        <div className="flex items-center gap-1.5">
+          <div className="relative min-w-0 flex-1">
+            <Search size={13} className="absolute left-2.5 top-2.5 text-mute" />
+            <input className="input !pl-7" placeholder="Поиск…" value={s.search} onChange={e => s.setSearch(e.target.value)} />
           </div>
-        )}
+          {s.leftTab === 'scenes' && (
+            <button className="btn btn-primary !px-2.5 shrink-0" onClick={s.addScene} title="Новая сцена"><Plus size={14} /></button>
+          )}
+        </div>
         {s.leftTab === 'chars' && (
           <button className="btn btn-primary w-full justify-center" onClick={s.addCharacter}><Plus size={14} /> Новый персонаж</button>
         )}
@@ -389,7 +393,9 @@ export function Sidebar() {
               onDrop={() => { if (dragIdx.current !== null && dragIdx.current !== idx) s.reorderScenes(dragIdx.current, idx); dragIdx.current = null; }}
               onClick={() => s.selectScene(sc.id)}
               className={`group flex items-center gap-1.5 px-2 py-2 rounded-lg cursor-pointer border transition-all ${sc.id === s.currentSceneId ? 'border-ink-500 bg-ink-700' : 'border-transparent hover:bg-ink-800'}`}
-              style={sc.id === s.currentSceneId ? { boxShadow: 'inset 3px 0 0 var(--accent)' } : {}}
+              style={sceneHasUnsavedChanges(sc)
+                ? { borderColor: '#ffb45488', boxShadow: sc.id === s.currentSceneId ? 'inset 3px 0 0 #ffb454' : undefined }
+                : sc.id === s.currentSceneId ? { boxShadow: 'inset 3px 0 0 var(--accent)' } : {}}
             >
               <GripVertical size={12} className="text-mute opacity-40 group-hover:opacity-100 cursor-grab" />
               {renaming === sc.id ? (
@@ -402,7 +408,11 @@ export function Sidebar() {
                   onKeyDown={e => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
                 />
               ) : (
-                <span className="flex-1 truncate text-[12.5px]" onDoubleClick={e => { e.stopPropagation(); setRenaming(sc.id); }} title="Двойной клик — переименовать">
+                <span
+                  className={`flex-1 truncate text-[12.5px] ${sceneHasUnsavedChanges(sc) ? 'text-amber-glow' : ''}`}
+                  onDoubleClick={e => { e.stopPropagation(); setRenaming(sc.id); }}
+                  title={sceneHasUnsavedChanges(sc) ? 'Есть несохранённые изменения · двойной клик — переименовать' : 'Двойной клик — переименовать'}
+                >
                   {sc.name}
                 </span>
               )}
@@ -910,8 +920,14 @@ export function Inspector() {
 
   return (
     <div className={`${s.rightOpen ? 'flex' : 'hidden'} w-[320px] shrink-0 flex-col border-l border-ink-700 panel relative z-10`}>
-      <div className="h-9 shrink-0 flex items-center px-3 border-b border-ink-700 text-[10.5px] uppercase tracking-wider font-bold text-mute">
-        {ch ? 'Карточка героя' : node ? `Нода · ${KIND_META[node.type as NodeKind]?.label ?? node.type}` : 'Сцена'}
+      <div className="h-9 shrink-0 flex items-center gap-2 px-3 border-b border-ink-700 text-[10.5px] uppercase tracking-wider font-bold text-mute">
+        <span className="truncate">{ch ? 'Карточка героя' : node ? `Нода · ${KIND_META[node.type as NodeKind]?.label ?? node.type}` : 'Сцена'}</span>
+        <div className="flex-1" />
+        {node && (
+          <button className="btn !px-2 !py-1 shrink-0" onClick={() => s.playFrom(node.id)} title="Проиграть с этой ноды">
+            <Play size={12} /> <span className="hidden sm:inline">Проиграть</span>
+          </button>
+        )}
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto">
         {ch && <CharacterEditor c={ch} />}
