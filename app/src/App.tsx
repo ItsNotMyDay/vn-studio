@@ -358,7 +358,7 @@ function Shell() {
                 <X size={13} /> Закрыть
               </button>
             </div>
-            <div className="absolute inset-0 pt-10">
+            <div className="absolute inset-x-0 top-10 bottom-0">
               <Stage full windowId="node-playback-preview" />
             </div>
           </div>
