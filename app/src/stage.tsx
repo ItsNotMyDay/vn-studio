@@ -263,13 +263,13 @@ export function Stage({ full = false, windowId }: { full?: boolean; windowId?: s
             style={{
               left: `${ent.x}%`,
               top: `${ent.y}%`,
-              height: '100%',
+              height: `${ent.scale}%`,
               width: 'max-content',
               minWidth: 'max-content',
               transform: 'translate(-50%, -100%)',
               zIndex: ent.z,
               transition: ent.moveEase && !ent.hiding
-                ? `left ${ent.duration}s ${moveCss(ent.moveEase)}, top ${ent.duration}s ${moveCss(ent.moveEase)}`
+                ? `left ${ent.duration}s ${moveCss(ent.moveEase)}, top ${ent.duration}s ${moveCss(ent.moveEase)}, height ${ent.duration}s ${moveCss(ent.moveEase)}`
                 : undefined,
             }}
           >
@@ -286,8 +286,8 @@ export function Stage({ full = false, windowId }: { full?: boolean; windowId?: s
               <div
                 className="h-full"
                 style={{
-                  transform: `rotate(${ent.rotation ?? 0}deg) scaleX(${(ent.widthScale ?? 100) / 100}) scaleY(${ent.scale / 100})`,
-                  transformOrigin: 'bottom center',
+                  transform: `rotate(${ent.rotation ?? 0}deg) scaleX(${(ent.widthScale ?? 100) / Math.max(10, ent.scale)})`,
+                  transformOrigin: 'center center',
                   transition: ent.moveEase && !ent.hiding ? `transform ${ent.duration}s ${moveCss(ent.moveEase)}` : undefined,
                 }}
               >
