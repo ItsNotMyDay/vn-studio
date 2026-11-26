@@ -5,7 +5,7 @@ import * as audioEngine from './audio';
 import { getAssetURL, importFile, deleteBlob, revokeAssetURL, putBlob } from './assets';
 import { embeddingsSearch, embeddingsIndex, type ContextChunk, type RichContext } from './ai';
 import { resolveVariableText } from './textVariables';
-import { createDialogueReplyId, getDialogueReplies, mergeDialogueData, type DialogueReply } from './dialogue';
+import { getDialogueReplies, mergeDialogueData, type DialogueReply } from './dialogue';
 import {
   listProjects, readProject, writeProject, createProjectRecord, deleteProjectRecord,
   renameProjectRecord, duplicateProjectRecord, getActiveId, setActiveId, migrateLegacy,
