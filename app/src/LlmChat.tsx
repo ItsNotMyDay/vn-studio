@@ -432,6 +432,7 @@ export function LlmChat() {
       </div>
       <QuantizationDialog
         open={quantizationOpen}
+        windowId="quantization-consultant-llm"
         modelName={modelName(aiCfg.llmPath)}
         onClose={() => setQuantizationOpen(false)}
         onSelect={mode => { setQuantizationOpen(false); void loadLlm(mode); }}
