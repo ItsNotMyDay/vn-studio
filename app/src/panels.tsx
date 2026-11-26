@@ -25,6 +25,7 @@ import { AudioEditor } from './AudioEditor';
 import { SoundEffectBuilder } from './SoundEffectBuilder';
 import { FloatingWindow } from './FloatingWindow';
 import { readProject } from './projects';
+import { createDialogueReplyId, getDialogueReplies } from './dialogue';
 import {
   loadAiSettings, saveAiSettings, aiHealth, llmHealth, embeddingsHealth, embeddingsClear, aiListModels,
   aiLoadJob, llmLoadJob, aiUnloadModel, llmUnload, aiCancelJob,
@@ -619,27 +620,6 @@ function SpritePreview({ c, expr }: { c: Character; expr: string }) {
   );
 }
 
-function DialogueSpritePreview({ characterId, expression }: { characterId?: string; expression?: string }) {
-  const c = useStore(s => s.project.characters.find(x => x.id === characterId));
-  if (!c) return null;
-  const hasFile = !!c.sprites?.[expression ?? 'neutral'];
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-1">
-        <span className="text-[10.5px] uppercase tracking-wider text-mute">Спрайт в кадре</span>
-        <span className="text-[10px]" style={{ color: hasFile ? '#9dff57' : '#8d97b5' }}>{hasFile ? 'свой файл' : 'процедурный'}</span>
-      </div>
-      <div
-        className="h-24 rounded-lg border border-ink-600 flex items-end justify-center overflow-hidden"
-        style={{ background: `radial-gradient(60% 60% at 50% 85%, ${c.color}22, #0e1220)` }}
-      >
-        <SpriteThumb c={c} expr={expression ?? 'neutral'} big />
-      </div>
-      <div className="text-[10px] text-mute mt-1">Появление персонажа задаётся нодой «Сущность»; реплика меняет только настроение.</div>
-    </div>
-  );
-}
-
 function BackgroundField({ nodeId, value }: { nodeId: string; value?: string }) {
   const s = useStore();
   const bg = s.project.backgrounds.find(b => b.id === value);
@@ -675,8 +655,8 @@ function MusicField({ nodeId, value, mode = 'music' }: { nodeId: string; value?:
   );
 }
 
-function VariableTextarea({ value, onChange, characters, className = 'textarea !min-h-[96px]' }: {
-  value: string; onChange: (value: string) => void; characters: Character[]; className?: string;
+function VariableTextarea({ value, onChange, characters, className = 'textarea !min-h-[96px]', onBlur }: {
+  value: string; onChange: (value: string) => void; characters: Character[]; className?: string; onBlur?: () => void;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const [suggestion, setSuggestion] = useState<VariableAutocomplete>(null);
@@ -706,7 +686,7 @@ function VariableTextarea({ value, onChange, characters, className = 'textarea !
         onKeyUp={e => {
           if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) refresh(value, e.currentTarget.selectionStart);
         }}
-        onBlur={() => window.setTimeout(() => setSuggestion(null), 120)}
+        onBlur={() => window.setTimeout(() => { setSuggestion(null); onBlur?.(); }, 120)}
       />
       {suggestion && (
         <div className="absolute left-0 right-0 top-full z-[55] mt-1 max-h-48 overflow-y-auto rounded-lg border border-ink-500 bg-ink-950 shadow-2xl p-1">
@@ -891,8 +871,42 @@ export function Inspector() {
   const [suggesting, setSuggesting] = useState(false);
   const [sugPhase, setSugPhase] = useState<null | 'count' | 'list'>(null);
   const [sugCount, setSugCount] = useState(3);
+  const [editingReplyId, setEditingReplyId] = useState<string | null>(null);
   const suggestAbort = useRef<AbortController | null>(null);
   const suggestJob = useRef<string | null>(null);
+  const dialogueReplies = node?.type === 'dialogue' ? getDialogueReplies(d, node.id) : [];
+
+  useEffect(() => {
+    setEditingReplyId(null);
+  }, [node?.id]);
+
+  const updateDialogueReply = (replyId: string, patch: Partial<{ characterId: string; expression: string; text: string }>) => {
+    if (!node || node.type !== 'dialogue') return;
+    const replies = getDialogueReplies(node.data, node.id).map(reply =>
+      reply.id === replyId ? { ...reply, ...patch } : reply,
+    );
+    s.updateNodeData(node.id, { replies });
+  };
+
+  const addDialogueReply = () => {
+    if (!node || node.type !== 'dialogue') return;
+    const previous = dialogueReplies[dialogueReplies.length - 1];
+    const reply = {
+      id: createDialogueReplyId(),
+      characterId: previous?.characterId ?? s.project.characters.find(c => !c.isNarrator)?.id ?? '',
+      expression: previous?.expression ?? 'neutral',
+      text: '',
+    };
+    s.updateNodeData(node.id, { replies: [...dialogueReplies, reply] });
+    setEditingReplyId(reply.id);
+  };
+
+  const removeDialogueReply = (replyId: string) => {
+    if (!node || node.type !== 'dialogue' || dialogueReplies.length <= 1) return;
+    const replies = dialogueReplies.filter(reply => reply.id !== replyId);
+    s.updateNodeData(node.id, { replies });
+    if (editingReplyId === replyId) setEditingReplyId(null);
+  };
 
   const askAi = async (n: Node, count: number) => {
     const sc2 = s.scene();
@@ -921,11 +935,13 @@ export function Inspector() {
   };
 
   const applySuggestion = (text: string) => {
-    if (!node) return;
-    s.updateNodeData(node.id, { text });
+    if (!node || node.type !== 'dialogue' || !dialogueReplies.length) return;
+    const lastReply = dialogueReplies[dialogueReplies.length - 1];
+    updateDialogueReply(lastReply.id, { text });
+    setEditingReplyId(null);
     setSugPhase(null);
     setSuggestions(null);
-    s.toast('Реплика применена');
+    s.toast('Вариант добавлен в последнюю реплику');
   };
 
   return (
@@ -953,29 +969,77 @@ export function Inspector() {
 
             {node.type === 'dialogue' && (
               <>
-                <Field label="Персонаж">
-                  <select className="select" value={d.characterId ?? ''} onChange={e => s.updateNodeData(node.id, { characterId: e.target.value })}>
-                    <option value="">— не выбран —</option>
-                    {s.project.characters.map(c => <option key={c.id} value={c.id}>{c.name}{c.isNarrator ? ' · GLOBAL' : ''}</option>)}
-                  </select>
-                </Field>
-                <Field label="Эмоция">
-                  <select className="select" value={d.expression ?? 'neutral'} onChange={e => s.updateNodeData(node.id, { expression: e.target.value })}>
-                    {EXPR.map(e => <option key={e} value={e}>{EXPR_RU[e]}</option>)}
-                  </select>
-                </Field>
-                {!s.project.characters.find(c => c.id === d.characterId)?.isNarrator && <DialogueSpritePreview characterId={d.characterId} expression={d.expression} />}
-                <Field label="Реплика">
-                  <VariableTextarea value={d.text ?? ''} characters={s.project.characters} onChange={text => s.updateNodeData(node.id, { text })} />
-                  <span className="text-[10px] text-mute">Подстановка переменных: @ИМЯ_ПЕРСОНАЖА.переменная · Рассказчик: @GLOBAL.переменная</span>
-                </Field>
-                <div className="text-[10.5px] text-mute">{(d.text ?? '').length} символов</div>
+                <div className="space-y-2.5">
+                  {dialogueReplies.map((reply, index) => (
+                    <div key={reply.id} className="rounded-xl border border-ink-700 bg-ink-900/55 p-2.5 space-y-2">
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <span className="w-5 shrink-0 text-[10px] font-mono text-mute">{index + 1}.</span>
+                        <select
+                          className="select min-w-0 flex-1"
+                          value={reply.characterId ?? ''}
+                          onChange={event => updateDialogueReply(reply.id, { characterId: event.target.value })}
+                          aria-label={`Персонаж реплики ${index + 1}`}
+                        >
+                          <option value="">— персонаж —</option>
+                          {s.project.characters.map(character => (
+                            <option key={character.id} value={character.id}>{character.name}{character.isNarrator ? ' · GLOBAL' : ''}</option>
+                          ))}
+                        </select>
+                        <select
+                          className="select !w-[112px] shrink-0"
+                          value={reply.expression ?? 'neutral'}
+                          onChange={event => updateDialogueReply(reply.id, { expression: event.target.value })}
+                          aria-label={`Эмоция реплики ${index + 1}`}
+                        >
+                          {EXPR.map(expression => <option key={expression} value={expression}>{EXPR_RU[expression]}</option>)}
+                        </select>
+                        {dialogueReplies.length > 1 && (
+                          <button
+                            className="btn btn-danger !px-1.5 shrink-0"
+                            onClick={() => removeDialogueReply(reply.id)}
+                            title="Удалить реплику"
+                            aria-label="Удалить реплику"
+                          >
+                            <X size={12} />
+                          </button>
+                        )}
+                      </div>
+                      {editingReplyId === reply.id ? (
+                        <VariableTextarea
+                          value={reply.text ?? ''}
+                          characters={s.project.characters}
+                          className="textarea !min-h-[64px]"
+                          onChange={text => updateDialogueReply(reply.id, { text })}
+                          onBlur={() => setEditingReplyId(current => current === reply.id ? null : current)}
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          className="w-full min-h-10 rounded-lg border border-transparent px-2 py-2 text-left text-[12px] leading-relaxed text-paper/90 whitespace-pre-wrap hover:border-ink-600 hover:bg-ink-850/70 transition-colors"
+                          onClick={() => setEditingReplyId(reply.id)}
+                          title="Нажмите, чтобы редактировать реплику"
+                        >
+                          {reply.text
+                            ? reply.text
+                            : <span className="italic text-mute">Нажмите, чтобы ввести реплику…</span>}
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                <button className="btn w-full justify-center" onClick={addDialogueReply}>
+                  <Plus size={13} /> Добавить
+                </button>
+                <div className="text-[10px] text-mute">
+                  Переменные: @ИМЯ_ПЕРСОНАЖА.переменная · Рассказчик: @GLOBAL.переменная
+                </div>
                 <button
                   className="btn w-full justify-center mt-1"
                   disabled={suggesting}
                   onClick={() => { setSuggestions(null); setSugPhase('count'); }}
                 >
-                  <Sparkles size={13} /> Предложить варианты (AI)
+                  <Sparkles size={13} /> Предложить варианты AI для последней реплики
                 </button>
               </>
             )}
