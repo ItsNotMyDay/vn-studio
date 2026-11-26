@@ -17,6 +17,7 @@ import { audioEnsure, audioPad, audioFile, effectPlay } from './audio';
 import { useAssetURL, getAssetURL, getBlob, putBlob, revokeAssetURL } from './assets';
 import { launchPlayer, post } from './bus';
 import { AiSpriteDialog } from './AiSpriteDialog';
+import { AiSpriteAssetDialog } from './AiSpriteAssetDialog';
 import { AiBackgroundDialog } from './AiBackgroundDialog';
 import { AiAudioDialog } from './AiAudioDialog';
 import { QuantizationDialog } from './QuantizationDialog';
@@ -316,6 +317,7 @@ export function Toolbar() {
 export function Sidebar() {
   const s = useStore();
   const [bgAi, setBgAi] = useState(false);
+  const [spriteAiOpen, setSpriteAiOpen] = useState(false);
   const [musicAiOpen, setMusicAiOpen] = useState(false);
   const [soundBuilderOpen, setSoundBuilderOpen] = useState(false);
   const q = s.search.toLowerCase();
@@ -464,6 +466,25 @@ export function Sidebar() {
             {bgs.length === 0 && <div className="text-[11px] text-mute px-2 py-1.5">Фоны не найдены.</div>}
 
             <div className="flex items-center justify-between px-1 pt-2">
+              <span className="text-[10px] uppercase tracking-wider text-mute">Спрайты</span>
+              <div className="flex gap-1">
+                <button
+                  className="btn !px-2 !py-1"
+                  style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}
+                  title="Сгенерировать спрайт нейросетью"
+                  onClick={() => setSpriteAiOpen(true)}
+                >
+                  <Sparkles size={12} /> AI
+                </button>
+                <UploadButton accept="image/*" title="Загрузить свой спрайт" onFile={(f: File) => s.addSpriteAsset(f)}>
+                  <Upload size={12} /> Загрузить
+                </UploadButton>
+              </div>
+            </div>
+            {sprs.map(sp => <SpriteAssetRow key={sp.id} sp={sp} />)}
+            {sprs.length === 0 && <div className="text-[11px] text-mute px-2 py-1.5">Спрайтов нет. Сгенерируйте или загрузите PNG с прозрачным фоном.</div>}
+
+            <div className="flex items-center justify-between px-1 pt-2">
               <span className="text-[10px] uppercase tracking-wider text-mute">Музыка</span>
               <div className="flex gap-1">
                 <button
@@ -490,15 +511,6 @@ export function Sidebar() {
             </div>
             {soundTracks.map(t => <TrackRow key={t.id} t={t} />)}
             {soundTracks.length === 0 && <div className="text-[11px] text-mute px-2 py-1.5">Коротких звуков пока нет. Создай первый сигнал.</div>}
-
-            <div className="flex items-center justify-between px-1 pt-2">
-              <span className="text-[10px] uppercase tracking-wider text-mute">Спрайты</span>
-              <UploadButton accept="image/*" title="Загрузить спрайт-ассет (для нод «Сущность»)" onFile={(f: File) => s.addSpriteAsset(f)}>
-                <Upload size={12} /> Загрузить
-              </UploadButton>
-            </div>
-            {sprs.map(sp => <SpriteAssetRow key={sp.id} sp={sp} />)}
-            {sprs.length === 0 && <div className="text-[11px] text-mute px-2 py-1.5">Спрайт-ассетов нет. Загрузите PNG с прозрачным фоном.</div>}
 
             <div className="text-[10px] text-mute px-1 pt-2 leading-snug">
               Файлы можно перетащить прямо в эту панель. Они хранятся локально (IndexedDB) и доступны в окне плеера.
@@ -538,6 +550,7 @@ export function Sidebar() {
       </div>
 
       <AiBackgroundDialog open={bgAi} onClose={() => setBgAi(false)} />
+      <AiSpriteAssetDialog open={spriteAiOpen} onClose={() => setSpriteAiOpen(false)} />
       <AiAudioDialog open={musicAiOpen} onClose={() => setMusicAiOpen(false)} />
       {soundBuilderOpen && <SoundEffectBuilder open={soundBuilderOpen} onClose={() => setSoundBuilderOpen(false)} />}
     </div>
@@ -1476,9 +1489,9 @@ function Toggle({ label, on, onChange }: { label: string; on: boolean; onChange:
   );
 }
 
-function Group({ title, children }: any) {
+function Group({ title, children, className = '' }: any) {
   return (
-    <div className="border border-ink-700 rounded-xl p-3 space-y-2.5 bg-ink-850/60">
+    <div className={`border border-ink-700 rounded-xl p-3 space-y-2.5 bg-ink-850/60 ${className}`}>
       <div className="text-[10px] uppercase tracking-widest text-mute font-bold">{title}</div>
       {children}
     </div>
@@ -1829,7 +1842,7 @@ function AiModelsPanel() {
 
   return (
     <>
-    <Group title="AI-модели">
+    <Group title="AI-модели" className="min-w-0 overflow-hidden">
       {hardwareInfo && (
         <div className="rounded-lg border border-ink-700 bg-ink-900/40 px-2.5 py-2 flex items-center gap-2 text-[10px]">
           <Cpu size={14} className="text-mute shrink-0" />
@@ -2015,17 +2028,6 @@ function AiModelsPanel() {
         <div className="text-[10px] text-mute leading-snug">
           ACE-Step работает в отдельном Python-окружении, не затрагивая зависимости LLM и генерации изображений. Модель автоматически подбирает профиль под оборудование; для фоновой музыки и музыкальных акцентов.
         </div>
-      </div>
-
-      <div className="border-t border-ink-700 pt-2 space-y-2">
-        <span className="block text-[10px] text-mute">Адрес AI-сервера (локальные модели, загрузки и RAG)</span>
-        <input
-          className="input"
-          value={s.director.aiEndpoint ?? 'http://127.0.0.1:8765'}
-          onChange={e => s.setDirector({ aiEndpoint: e.target.value })}
-          placeholder="http://192.168.1.10:8765"
-        />
-        <span className="block text-[10px] text-mute">Для другого ПК укажи сетевой адрес компьютера, на котором запущен ai-server.</span>
       </div>
 
       <div className="border-t border-ink-700 pt-2 flex flex-wrap items-center gap-1.5">
@@ -2240,7 +2242,9 @@ export function DirectorConsole() {
           <button className="btn !px-2" title="Закрыть (Esc)" onClick={() => s.setConsoleOpen(false)}><X size={14} /></button>
         </div>
         <div className="p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-          <AiModelsPanel />
+          <div className="md:col-span-2 xl:col-span-3 min-w-0 overflow-hidden">
+            <AiModelsPanel />
+          </div>
           <Group title="Текст">
             <Slider label="Скорость текста" value={d.cps} min={8} max={80} unit=" зн/с" onChange={v => set({ cps: v })} />
             <Slider label="Кегль реплик" value={d.fontSize} min={13} max={24} unit="px" onChange={v => set({ fontSize: v })} />
