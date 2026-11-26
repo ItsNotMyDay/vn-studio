@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { RotateCcw, Image as ImageIcon } from 'lucide-react';
 import { useStore, moveCss, type Character, type StageEntity } from './store';
 import { useAssetURL } from './assets';
+import { isFloatingWindowActive } from './windowFocus';
 
 /* ------------------------------ effect keyframes ----------------------------- */
 
@@ -170,7 +171,7 @@ export function EntityView({ ent }: { ent: StageEntity }) {
 
 /* ------------------------------------ stage ---------------------------------- */
 
-export function Stage({ full = false }: { full?: boolean }) {
+export function Stage({ full = false, windowId }: { full?: boolean; windowId?: string }) {
   const player = useStore(s => s.player);
   const director = useStore(s => s.director);
   const scene = useStore(s => s.scene());
@@ -216,13 +217,14 @@ export function Stage({ full = false }: { full?: boolean }) {
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
+      if (windowId && !isFloatingWindowActive(windowId)) return;
       if (!player.pending) return;
       const i = parseInt(e.key) - 1;
       if (i >= 0 && i < player.pending.options.length) choose(i);
     };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
-  }, [player.pending]);
+  }, [player.pending, windowId]);
 
   const particles = useMemo(() => Array.from({ length: 14 }, (_, i) => ({ left: (i * 71) % 100, delay: (i * 0.7) % 6, dur: 5 + (i % 5), size: 2 + (i % 3) })), []);
 
