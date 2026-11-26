@@ -87,7 +87,7 @@ def safe_extract_zip(archive: zipfile.ZipFile, destination: Path) -> Path:
 
 class AudioRuntime:
     def __init__(self, base_dir: str | Path | None = None, port: int = DEFAULT_AUDIO_PORT):
-        default_dir = Path(__file__).resolve().parent / "audio-runtime"
+        default_dir = Path(os.environ.get("VN_AUDIO_RUNTIME_DIR") or (Path(__file__).resolve().parent / "audio-runtime"))
         self.base_dir = Path(base_dir or default_dir).resolve()
         self.repo_dir = self.base_dir / "ACE-Step-1.5"
         self.generated_dir = self.base_dir / "generated"
@@ -449,6 +449,12 @@ class AudioRuntime:
                 "3.11",
                 "--no-dev",
                 "--locked",
+                "--no-install-package",
+                "torch",
+                "--no-install-package",
+                "torchvision",
+                "--no-install-package",
+                "torchaudio",
             ],
             self.repo_dir,
             env,
@@ -480,6 +486,53 @@ class AudioRuntime:
                 "uv sync завершился, но пакет loguru всё ещё недоступен в окружении ACE-Step. "
                 + detail
             )
+
+        # Both isolated environments use the same managed Python 3.11 runtime,
+        # but each chooses and installs its own hardware-compatible PyTorch wheels.
+        # Skipping the lockfile's CUDA-specific torch wheels above lets uv detect
+        # NVIDIA CUDA, AMD ROCm, Intel XPU, or CPU on this particular PC.
+        torch_args = [
+            *uv,
+            "pip",
+            "install",
+            "--python",
+            str(python),
+            "--torch-backend=auto",
+            "torch==2.7.1",
+            "torchvision==0.22.1",
+            "torchaudio==2.7.1",
+        ]
+        self._run_command(
+            torch_args,
+            self.base_dir,
+            os.environ.copy(),
+            job_id,
+            "Установка PyTorch для оборудования этого ПК",
+            0.82,
+            timeout=2 * 60 * 60,
+        )
+
+        try:
+            torch_probe = subprocess.run(
+                [
+                    str(python),
+                    "-c",
+                    "import torch, torchvision, torchaudio; "
+                    "print('torch=' + str(torch.__version__)); "
+                    "print('cuda=' + str(torch.cuda.is_available())); "
+                    "print('xpu=' + str(hasattr(torch, 'xpu') and torch.xpu.is_available()))",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise RuntimeError("Не удалось проверить PyTorch в окружении ACE-Step.") from exc
+        if torch_probe.returncode != 0:
+            detail = (torch_probe.stderr or torch_probe.stdout or "").strip()[-1400:]
+            raise RuntimeError("PyTorch не прошёл проверку после установки ACE-Step. " + detail)
+        self._append_log((torch_probe.stdout or "").strip())
 
     def _install(self, job_id: str) -> dict[str, Any]:
         if self.process_running():

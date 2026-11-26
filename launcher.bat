@@ -24,7 +24,6 @@ if not exist "%APP_DIR%\package.json" (
 )
 
 set "VN_MODEL_PATH=C:\models\Qwen-Image-2.1-Turbo"
-set "VN_LLM_PATH=C:\models\qwen3-14b"
 set "VN_EMBED_PATH=C:\models\e5-small"
 if not defined VN_SERVER_HOST set "VN_SERVER_HOST=127.0.0.1"
 if not defined VN_SERVER_PORT set "VN_SERVER_PORT=8765"
@@ -35,7 +34,6 @@ if not errorlevel 1 goto server_ready
 
 echo Запуск AI-сервера... >> "%ROOT_DIR%launcher.log"
 echo VN_MODEL_PATH=%VN_MODEL_PATH% >> "%ROOT_DIR%launcher.log"
-echo VN_LLM_PATH=%VN_LLM_PATH% >> "%ROOT_DIR%launcher.log"
 echo VN_EMBED_PATH=%VN_EMBED_PATH% >> "%ROOT_DIR%launcher.log"
 
 pushd "%AI_DIR%"

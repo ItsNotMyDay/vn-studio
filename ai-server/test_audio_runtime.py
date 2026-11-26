@@ -134,9 +134,9 @@ class AudioRuntimeTests(unittest.TestCase):
                         0.12,
                     )
 
-                command, cwd, env, job_id, stage, progress = run_command.call_args.args[:6]
+                sync_command, sync_cwd, sync_env, job_id, stage, progress = run_command.call_args_list[0].args[:6]
                 self.assertEqual(
-                    command,
+                    sync_command,
                     [
                         "uv",
                         "sync",
@@ -146,18 +146,46 @@ class AudioRuntimeTests(unittest.TestCase):
                         "3.11",
                         "--no-dev",
                         "--locked",
+                        "--no-install-package",
+                        "torch",
+                        "--no-install-package",
+                        "torchvision",
+                        "--no-install-package",
+                        "torchaudio",
                     ],
                 )
-                self.assertEqual(cwd, runtime.repo_dir)
-                self.assertEqual(env["UV_PROJECT_ENVIRONMENT"], str(runtime.repo_dir / ".venv"))
+                self.assertEqual(sync_cwd, runtime.repo_dir)
+                self.assertEqual(sync_env["UV_PROJECT_ENVIRONMENT"], str(runtime.repo_dir / ".venv"))
                 self.assertEqual(job_id, "job123")
                 self.assertEqual(stage, "Проверка зависимостей")
                 self.assertEqual(progress, 0.12)
-                probe.assert_called_once_with(
+
+                torch_command, torch_cwd, _, _, torch_stage, _ = run_command.call_args_list[1].args[:6]
+                self.assertIn("--torch-backend=auto", torch_command)
+                self.assertIn("torch==2.7.1", torch_command)
+                self.assertIn("torchaudio==2.7.1", torch_command)
+                self.assertEqual(torch_cwd, runtime.base_dir)
+                self.assertEqual(torch_stage, "Установка PyTorch для оборудования этого ПК")
+
+                probe.assert_any_call(
                     [str(python_path), "-c", "import loguru"],
                     capture_output=True,
                     text=True,
                     timeout=30,
+                    check=False,
+                )
+                probe.assert_any_call(
+                    [
+                        str(python_path),
+                        "-c",
+                        "import torch, torchvision, torchaudio; "
+                        "print('torch=' + str(torch.__version__)); "
+                        "print('cuda=' + str(torch.cuda.is_available())); "
+                        "print('xpu=' + str(hasattr(torch, 'xpu') and torch.xpu.is_available()))",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
                     check=False,
                 )
             finally:

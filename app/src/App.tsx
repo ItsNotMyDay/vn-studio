@@ -4,7 +4,7 @@ import {
   BaseEdge, EdgeLabelRenderer, getBezierPath, useReactFlow,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { X, Search, Clapperboard, Loader2, Save } from 'lucide-react';
+import { X, Search, Clapperboard, Loader2, Save, Server, CheckCircle2, AlertTriangle, RefreshCw } from 'lucide-react';
 import { Toolbar, Sidebar, Inspector, DirectorConsole, PaletteDragGhost, Toasts } from './panels';
 import { nodeTypes } from './nodes';
 import { StagePreview } from './StagePreview';
@@ -218,6 +218,74 @@ function Shell() {
   const [closeState, setCloseState] = useState<'idle' | 'confirm' | 'shutting'>('idle');
   const [consultantOpen, setConsultantOpen] = useState(false);
   const [closeError, setCloseError] = useState('');
+  const [aiServerRetry, setAiServerRetry] = useState(0);
+  const [aiServerSetup, setAiServerSetup] = useState<{
+    state: 'installing' | 'ready' | 'error';
+    progress: number;
+    stage: string;
+    detail?: string;
+    error?: string;
+  } | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    let unlisten: (() => void) | undefined;
+
+    const startLocalAiServer = async () => {
+      if (!(window as any).__TAURI_INTERNALS__) return;
+      const endpoint = (s.director.aiEndpoint || 'http://127.0.0.1:8765').replace(/\/+$/, '');
+      try {
+        const { listen } = await import('@tauri-apps/api/event');
+        const cleanup = await listen<{
+          progress: number;
+          stage: string;
+          detail?: string;
+        }>('ai-server-setup-progress', event => {
+          if (!alive) return;
+          const payload = event.payload;
+          setAiServerSetup({
+            state: 'installing',
+            progress: Math.max(0, Math.min(1, payload.progress ?? 0)),
+            stage: payload.stage || 'Подготовка AI-сервера',
+            detail: payload.detail,
+          });
+        });
+        if (alive) unlisten = cleanup;
+        else cleanup();
+
+        const { invoke } = await import('@tauri-apps/api/core');
+        const result = await invoke<{ external?: boolean; already_running?: boolean }>(
+          'ensure_ai_server',
+          { endpoint },
+        );
+        if (!alive) return;
+        if (result.external || result.already_running) {
+          setAiServerSetup(null);
+        } else {
+          setAiServerSetup({
+            state: 'ready',
+            progress: 1,
+            stage: 'AI-сервер готов',
+            detail: 'Сервер установлен и запущен. При следующих стартах установка повторяться не будет.',
+          });
+        }
+      } catch (error: any) {
+        if (!alive) return;
+        setAiServerSetup({
+          state: 'error',
+          progress: 0,
+          stage: 'Не удалось подготовить AI-сервер',
+          error: error?.message ?? String(error),
+        });
+      }
+    };
+
+    void startLocalAiServer();
+    return () => {
+      alive = false;
+      unlisten?.();
+    };
+  }, [s.director.aiEndpoint, aiServerRetry]);
 
   useEffect(() => {
     document.documentElement.style.setProperty('--accent', accent);
@@ -374,6 +442,47 @@ function Shell() {
       )}
       </>
       ) : <Launcher />}
+      {aiServerSetup && (
+        <div className="fixed bottom-4 right-4 z-[180] w-[min(440px,calc(100vw-32px))] rounded-2xl border border-ink-600 bg-ink-950/95 p-4 shadow-2xl backdrop-blur-md">
+          <div className="flex items-center gap-2">
+            {aiServerSetup.state === 'ready'
+              ? <CheckCircle2 size={16} className="text-lime" />
+              : aiServerSetup.state === 'error'
+                ? <AlertTriangle size={16} className="text-danger" />
+                : <Server size={16} style={{ color: 'var(--accent)' }} />}
+            <div className="min-w-0 flex-1 font-display font-bold text-[12px]">{aiServerSetup.stage}</div>
+            {aiServerSetup.state === 'installing' && <Loader2 size={14} className="animate-spin text-mute" />}
+            {aiServerSetup.state === 'ready' && (
+              <button className="btn !px-2 !py-1" onClick={() => setAiServerSetup(null)} title="Скрыть">
+                <X size={12} />
+              </button>
+            )}
+          </div>
+          {aiServerSetup.state === 'installing' && (
+            <>
+              <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-ink-700">
+                <div className="h-full rounded-full transition-all duration-300" style={{ width: `${Math.max(4, aiServerSetup.progress * 100)}%`, background: 'linear-gradient(90deg,var(--accent),#ff6b3d)' }} />
+              </div>
+              <div className="mt-2 text-[10px] text-mute">При первом запуске скачивается Python и зависимости AI-сервера. Это может занять время и потребовать несколько гигабайт места.</div>
+              {aiServerSetup.detail && <div className="mt-1 truncate text-[10px] text-paper/70" title={aiServerSetup.detail}>{aiServerSetup.detail}</div>}
+            </>
+          )}
+          {aiServerSetup.state === 'ready' && (
+            <div className="mt-2 text-[10px] text-mute">{aiServerSetup.detail}</div>
+          )}
+          {aiServerSetup.state === 'error' && (
+            <>
+              <div className="mt-2 max-h-28 overflow-y-auto whitespace-pre-wrap break-words text-[10px] text-danger">{aiServerSetup.error}</div>
+              <div className="mt-3 flex justify-end gap-2">
+                <button className="btn !px-2 !py-1" onClick={() => setAiServerSetup(null)}>Скрыть</button>
+                <button className="btn btn-primary !px-2 !py-1" onClick={() => setAiServerRetry(value => value + 1)}>
+                  <RefreshCw size={12} /> Повторить
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
       {closeState !== 'idle' && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-[#07080c] p-5">
           {closeState === 'confirm' ? (
