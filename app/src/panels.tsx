@@ -1975,7 +1975,7 @@ function AiModelsPanel() {
               patch({ llmProvider: 'local', llmPath: value });
             }}
           >
-            <option value="">— по умолчанию (VN_LLM_PATH) —</option>
+            <option value="">— выберите локальную модель —</option>
             {llmOptions.map(o => <option key={o.path} value={o.path}>{o.id}</option>)}
             {cfg.openaiConnections.map(connection => (
               <option key={connection.id} value={`__openai__:${connection.id}`}>
