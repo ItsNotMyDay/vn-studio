@@ -108,6 +108,7 @@ export function FloatingWindow({
     }
     // Every newly opened internal tool starts maximized. Restoring from the
     // minimized dock keeps its current state because open does not change.
+    setMinimized(false);
     setMaximized(true);
     if (!minimized) bringToFront();
     return () => {
