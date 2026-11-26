@@ -303,6 +303,24 @@ class ModelCompatibilityReq(BaseModel):
 # Common helpers
 # ============================================================
 
+def cuda_info():
+    # Called only by actual model loading, never by the lightweight health probe.
+    try:
+        import torch
+        if torch.cuda.is_available():
+            p = torch.cuda.get_device_properties(0)
+            return "cuda", round(p.total_memory / 1024 ** 3, 2), torch.cuda.get_device_name(0)
+        if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+            return "mps", 0.0, "Apple Metal"
+        if hasattr(torch, "xpu") and torch.xpu.is_available():
+            try:
+                return "xpu", 0.0, torch.xpu.get_device_name(0)
+            except Exception:
+                return "xpu", 0.0, "Intel XPU"
+    except Exception:
+        pass
+    return "cpu", 0.0, "CPU"
+
 def _fp(cls, path, **kw):
     """from_pretrained с новым ключом dtype и откатом на torch_dtype."""
     try:
@@ -812,7 +830,6 @@ def load_llm(path: str, quantization_mode: str = "none"):
     if quantization_mode not in ("int4", "fp16", "none"):
         raise ValueError(f"Неизвестный режим квантования: {quantization_mode}")
 
-    _ensure_transformers_ready()
     compatibility = build_compatibility_report(path, "llm")
     profile_is_reliable = _compatibility_profile_is_reliable(compatibility)
     model_info = compatibility.get("model") or {}
