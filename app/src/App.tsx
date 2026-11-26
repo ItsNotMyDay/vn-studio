@@ -233,7 +233,7 @@ function Shell() {
 
     const startLocalAiServer = async () => {
       if (!(window as any).__TAURI_INTERNALS__) return;
-      const endpoint = (s.director.aiEndpoint || 'http://127.0.0.1:8765').replace(/\\/+$/, '');
+      const endpoint = (s.director.aiEndpoint || 'http://127.0.0.1:8765').replace(/\/+$/, '');
       try {
         const { listen } = await import('@tauri-apps/api/event');
         const cleanup = await listen<{
@@ -407,6 +407,41 @@ function Shell() {
       <DirectorConsole />
       <PaletteDragGhost />
       <Toasts />
+      <CompileDialog open={s.compileOpen} onClose={() => s.setCompileOpen(false)} />
+      <CompiledPreviewWindow open={s.compiledPreviewOpen} onClose={() => s.setCompiledPreviewOpen(false)} />
+      
+      {s.playOverlay && (
+        <FloatingWindow
+          id="node-playback-preview"
+          title="Предпросмотр с ноды"
+          open={s.playOverlay}
+          onClose={() => { useStore.getState().stop(); useStore.getState().setPlayOverlay(false); }}
+          width={1120}
+          height={780}
+        >
+          <div className="relative w-full h-[min(82vh,760px)] border border-ink-600 rounded-xl overflow-hidden panel">
+            <div data-floating-handle className="absolute top-0 inset-x-0 z-[85] h-10 px-3 flex items-center gap-2 border-b border-ink-700 bg-ink-950/90 backdrop-blur cursor-move">
+              <span className="chip !text-[11px]" style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>
+                предпросмотр с ноды
+              </span>
+              <span className="chip !text-[11px] border-ink-600 text-mute">{s.scene()?.name}</span>
+              <div className="flex-1" />
+              <button
+                className="btn btn-danger"
+                onClick={() => { useStore.getState().stop(); useStore.getState().setPlayOverlay(false); }}
+                title="Закрыть предпросмотр"
+              >
+                <X size={13} /> Закрыть
+              </button>
+            </div>
+            <div className="absolute inset-x-0 top-10 bottom-0">
+              <Stage full windowId="node-playback-preview" />
+            </div>
+          </div>
+        </FloatingWindow>
+      )}
+      </>
+      ) : <Launcher />}
       {aiServerSetup && (
         <div className="fixed bottom-4 right-4 z-[180] w-[min(440px,calc(100vw-32px))] rounded-2xl border border-ink-600 bg-ink-950/95 p-4 shadow-2xl backdrop-blur-md">
           <div className="flex items-center gap-2">
@@ -448,41 +483,6 @@ function Shell() {
           )}
         </div>
       )}
-      <CompileDialog open={s.compileOpen} onClose={() => s.setCompileOpen(false)} />
-      <CompiledPreviewWindow open={s.compiledPreviewOpen} onClose={() => s.setCompiledPreviewOpen(false)} />
-      
-      {s.playOverlay && (
-        <FloatingWindow
-          id="node-playback-preview"
-          title="Предпросмотр с ноды"
-          open={s.playOverlay}
-          onClose={() => { useStore.getState().stop(); useStore.getState().setPlayOverlay(false); }}
-          width={1120}
-          height={780}
-        >
-          <div className="relative w-full h-[min(82vh,760px)] border border-ink-600 rounded-xl overflow-hidden panel">
-            <div data-floating-handle className="absolute top-0 inset-x-0 z-[85] h-10 px-3 flex items-center gap-2 border-b border-ink-700 bg-ink-950/90 backdrop-blur cursor-move">
-              <span className="chip !text-[11px]" style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>
-                предпросмотр с ноды
-              </span>
-              <span className="chip !text-[11px] border-ink-600 text-mute">{s.scene()?.name}</span>
-              <div className="flex-1" />
-              <button
-                className="btn btn-danger"
-                onClick={() => { useStore.getState().stop(); useStore.getState().setPlayOverlay(false); }}
-                title="Закрыть предпросмотр"
-              >
-                <X size={13} /> Закрыть
-              </button>
-            </div>
-            <div className="absolute inset-x-0 top-10 bottom-0">
-              <Stage full windowId="node-playback-preview" />
-            </div>
-          </div>
-        </FloatingWindow>
-      )}
-      </>
-      ) : <Launcher />}
       {closeState !== 'idle' && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-[#07080c] p-5">
           {closeState === 'confirm' ? (
