@@ -5,6 +5,7 @@ import * as audioEngine from './audio';
 import { getAssetURL, importFile, deleteBlob, revokeAssetURL, putBlob } from './assets';
 import { embeddingsSearch, embeddingsIndex, type ContextChunk, type RichContext } from './ai';
 import { resolveVariableText } from './textVariables';
+import { createDialogueReplyId, getDialogueReplies, mergeDialogueData } from './dialogue';
 import {
   listProjects, readProject, writeProject, createProjectRecord, deleteProjectRecord,
   renameProjectRecord, duplicateProjectRecord, getActiveId, setActiveId, migrateLegacy,
@@ -96,7 +97,7 @@ export const DIRECTOR_DEFAULT: Director = {
 };
 export const KIND_META: Record<NodeKind, { label: string; color: string; icon: string; group: string }> = {
   start: { label: 'Старт', color: '#9dff57', icon: 'play', group: 'Поток' },
-  dialogue: { label: 'Реплика', color: '#39d5ff', icon: 'message', group: 'Диалог' },
+  dialogue: { label: 'Диалог', color: '#39d5ff', icon: 'message', group: 'Диалог' },
   choice: { label: 'Выбор', color: '#ff4d8d', icon: 'branch', group: 'Диалог' },
   variable: { label: 'Переменная', color: '#8b7bff', icon: 'sigma', group: 'Логика' },
   background: { label: 'Фон', color: '#ffb454', icon: 'image', group: 'Медиа' },
@@ -1074,7 +1075,7 @@ export const useStore = create<Store>((set, get) => {
       const defaults: Record<NodeKind, any> = {
         start: {},
         end: {},
-        dialogue: { characterId: firstChar?.id, expression: 'neutral', text: '' },
+        dialogue: { characterId: firstChar?.id, expression: 'neutral', text: '', replies: [{ id: uid('r'), characterId: firstChar?.id, expression: 'neutral', text: '' }] },
         choice: {
           mode: 'menu', prompt: 'Что делать?',
           options: [{ id: uid('o'), text: 'Вариант А' }, { id: uid('o'), text: 'Вариант Б' }],
@@ -1098,7 +1099,16 @@ export const useStore = create<Store>((set, get) => {
       return id;
     },
     updateNodeData: (id, patch) => {
-      mutateScene(sc => ({ ...sc, nodes: sc.nodes.map(n => n.id === id ? { ...n, data: { ...n.data, ...patch } } : n) }));
+      mutateScene(sc => ({
+        ...sc,
+        nodes: sc.nodes.map(n => {
+          if (n.id !== id) return n;
+          const data = n.type === 'dialogue'
+            ? mergeDialogueData(n.data, patch as Record<string, any>, n.id)
+            : { ...n.data, ...patch };
+          return { ...n, data };
+        }),
+      }));
       const pv = get().preview;
       if (pv) set({ preview: simulate(pv.nodeId) });
     },
@@ -1460,10 +1470,23 @@ export const useStore = create<Store>((set, get) => {
         if (!cur) continue;
         const cd: any = cur.data ?? {};
         if (cur.type === 'dialogue') {
-          const ch = characters.find(c => c.id === cd.characterId);
-          eventHistory.push({ text: cd.text ?? '', meta: { speaker: ch?.name ?? '???', emotion: cd.expression ?? 'neutral', node_type: 'dialogue', character_id: cd.characterId } });
-          seenChars.add(cd.characterId);
-          (charLines[cd.characterId] ??= []).push(cd.text ?? '');
+          const replies = getDialogueReplies(cd, cur.id);
+          replies.forEach(reply => {
+            const ch = characters.find(c => c.id === reply.characterId);
+            eventHistory.push({
+              text: reply.text ?? '',
+              meta: {
+                speaker: ch?.name ?? '???',
+                emotion: reply.expression ?? 'neutral',
+                node_type: 'dialogue',
+                character_id: reply.characterId,
+              },
+            });
+            if (reply.characterId) {
+              seenChars.add(reply.characterId);
+              (charLines[reply.characterId] ??= []).push(reply.text ?? '');
+            }
+          });
         } else if (cur.type === 'background') {
           const bg = backgrounds.find(b => b.id === cd.bg);
           if (bg) { bgs.push(bg.name); eventHistory.push({ text: `[Фон: ${bg.name}]`, meta: { node_type: 'background', background: bg.name } }); }
@@ -1510,11 +1533,23 @@ export const useStore = create<Store>((set, get) => {
     indexCurrentChapter: async () => {
       const sc = get().scene();
       if (!sc) return;
-      const chunks: ContextChunk[] = sc.nodes.filter(n => n.type === 'dialogue').map(n => {
-        const d: any = n.data ?? {};
-        const ch = get().project.characters.find(c => c.id === d.characterId);
-        return { text: `${ch?.name ?? '???'}: ${d.text ?? ''}`, meta: { speaker: ch?.name, emotion: d.expression, node_type: 'dialogue', character_id: d.characterId } };
-      });
+      const chunks: ContextChunk[] = sc.nodes
+        .filter(n => n.type === 'dialogue')
+        .flatMap(n => {
+          const data: any = n.data ?? {};
+          return getDialogueReplies(data, n.id).map(reply => {
+            const ch = get().project.characters.find(c => c.id === reply.characterId);
+            return {
+              text: `${ch?.name ?? '???'}: ${reply.text ?? ''}`,
+              meta: {
+                speaker: ch?.name,
+                emotion: reply.expression ?? 'neutral',
+                node_type: 'dialogue',
+                character_id: reply.characterId,
+              },
+            };
+          });
+        });
       const ep = get().director.aiEndpoint ?? 'http://127.0.0.1:8765';
       const r = await embeddingsIndex(ep, sc.id, chunks);
       if (r.ok) get().toast(`Глава проиндексирована (${r.count ?? chunks.length} фрагментов)`);
@@ -1631,7 +1666,12 @@ export const useStore = create<Store>((set, get) => {
         if (!node) return;
         const d: any = node.data ?? {};
         const ind = '  '.repeat(depth);
-        if (node.type === 'dialogue') lines.push(`${ind}${st.project.characters.find(c => c.id === d.characterId)?.name ?? '???'} (${d.expression ?? 'neutral'}): ${d.text ?? ''}`);
+        if (node.type === 'dialogue') {
+          getDialogueReplies(d, node.id).forEach(reply => {
+            const speaker = st.project.characters.find(c => c.id === reply.characterId)?.name ?? '???';
+            lines.push(`${ind}${speaker} (${reply.expression ?? 'neutral'}): ${reply.text ?? ''}`);
+          });
+        }
         if (node.type === 'background') lines.push(`${ind}[Фон: ${st.project.backgrounds.find(b => b.id === d.bg)?.name ?? '—'}]`);
         if (node.type === 'music') lines.push(`${ind}[${d.mode === 'effect' ? 'Эффект' : 'Музыка'}: ${st.project.tracks.find(t => t.id === d.track)?.name ?? '—'}]`);
         if (node.type === 'pause') lines.push(`${ind}[Пауза: ${d.seconds === -1 ? 'до клика' : `${d.seconds ?? 0} с`}]`);
