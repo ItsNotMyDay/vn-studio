@@ -443,6 +443,15 @@ fn install_and_start_ai_server(
         ("UV_CACHE_DIR".to_string(), cache_dir.to_string_lossy().to_string()),
         ("UV_HTTP_TIMEOUT".to_string(), "120".to_string()),
         ("UV_HTTP_RETRIES".to_string(), "5".to_string()),
+        ("UV_PYTHON_PREFERENCE".to_string(), "only-managed".to_string()),
+        (
+            "PATH".to_string(),
+            format!(
+                "{};{}",
+                root.join("uv").to_string_lossy(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        ),
         ("PYTHONUTF8".to_string(), "1".to_string()),
     ];
 
