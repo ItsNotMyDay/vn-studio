@@ -1523,7 +1523,7 @@ export const useStore = create<Store>((set, get) => {
         }
         sc.edges.filter(e => e.source === curId && e.sourceHandle !== 'stop').forEach(e => queue.push(e.target));
       }
-      const otherChars = Array.from(seenChars).filter(id => id && id !== d.characterId).map(id => {
+      const otherChars = Array.from(seenChars).filter(id => id && id !== currentCharacterId).map(id => {
         const c = characters.find(x => x.id === id);
         if (!c) return null;
         return { name: c.name, personality: c.personality, appearance: c.appearance, recent_lines: (charLines[id] ?? []).slice(-3) };
