@@ -1415,6 +1415,7 @@ def llm_load(req: Optional[LoadReq] = None):
     path = request.model_path or LLM_PATH_DEFAULT
     if not os.path.isdir(path):
         raise HTTPException(404, detail=f"LLM folder not found: {path}")
+    _ensure_transformers_ready()
     compatibility = build_compatibility_report(path, "llm")
     with LLM_LOCK:
         current_quantization = (LLM_STATE.get("profile") or {}).get("quantization", "none")
