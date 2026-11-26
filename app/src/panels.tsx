@@ -2171,9 +2171,9 @@ function AiModelsPanel() {
     )}
 
     {addMode && (
-      <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={() => !downloadProg.on && setAddMode(null)}>
-        <div className="panel border border-ink-600 rounded-2xl w-[min(520px,94vw)] p-4 shadow-2xl space-y-3" onClick={e => e.stopPropagation()}>
-          <div className="flex items-center gap-2">
+      <FloatingWindow id="add-ai-model" title="Добавить модель" open={!!addMode} onClose={() => { if (!downloadProg.on && !apiChecking) setAddMode(null); }} width={520} height={520}>
+        <div className="panel border border-ink-600 rounded-2xl w-full p-4 shadow-2xl space-y-3">
+          <div data-floating-handle className="flex items-center gap-2 cursor-move">
             <Package size={16} style={{ color: 'var(--accent)' }} />
             <span className="font-bold text-[13px]">Добавить модель</span>
             <div className="flex-1" />
@@ -2230,7 +2230,7 @@ function AiModelsPanel() {
             </div>
           )}
         </div>
-      </div>
+      </FloatingWindow>
     )}
     </>
   );
