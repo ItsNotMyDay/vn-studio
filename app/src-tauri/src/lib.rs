@@ -11,7 +11,7 @@ use std::{
 };
 use tauri::{AppHandle, Emitter, Manager};
 
-const AI_SERVER_REVISION: &str = "4247d34306c848e0807d5e155f7665913bc4d9e7";
+const AI_SERVER_REVISION: &str = "6a774bf99fa336e55cfa1f913a20eaba28a8d857";
 const UV_VERSION: &str = "0.13.10";
 const UV_WINDOWS_X64_URL: &str = "https://releases.astral.sh/github/uv/releases/download/0.13.10/uv-x86_64-pc-windows-msvc.zip";
 const UV_WINDOWS_X64_SHA256: &str =
@@ -531,8 +531,6 @@ fn install_and_start_ai_server(
             &log_path,
         )?;
 
-        fs::write(&marker_path, AI_SERVER_REVISION)
-            .map_err(|error| format!("Не удалось сохранить состояние установки: {error}"))?;
     }
 
     emit_setup_progress(
@@ -587,6 +585,8 @@ fn install_and_start_ai_server(
 
     for attempt in 0..120 {
         if local_server_health(port) {
+            fs::write(&marker_path, AI_SERVER_REVISION)
+                .map_err(|error| format!("Не удалось сохранить состояние установки: {error}"))?;
             emit_setup_progress(&app, 0.99, "AI-сервер готов", "Локальный API отвечает на /health");
             return Ok(json!({
                 "server_url": format!("http://127.0.0.1:{port}"),
