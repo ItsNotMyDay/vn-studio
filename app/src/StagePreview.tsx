@@ -124,8 +124,11 @@ export function StagePreview() {
         // The top handle is attached to the real, scaled edge of the sprite.
         // Project screen movement onto its local vertical axis (clockwise CSS rotation).
         const localUp = dx * Math.sin(angle) - dy * Math.cos(angle);
-        const factor = Math.max(10 / drag.os, 1 + localUp / drag.hpx);
-        useStore.getState().previewTransform(drag.key, { scale: drag.os * factor });
+        const deltaScale = (localUp * 2 / rect.height) * 100;
+        const scale = Math.max(10, Math.min(300, drag.os + deltaScale));
+        // Keep the geometric center fixed while both edges move symmetrically.
+        const y = drag.oy + (scale - drag.os) / 2;
+        useStore.getState().previewTransform(drag.key, { scale, y });
       } else if (drag.mode === 'resize-width') {
         const localRight = dx * Math.cos(angle) + dy * Math.sin(angle);
         const factor = Math.max(10 / drag.ow, 1 + localRight / drag.wpx);
@@ -245,7 +248,8 @@ export function StagePreview() {
                 onPointerDown={e => startDrag(e, ent.key, 'move')}
                 onWheel={e => {
                   e.stopPropagation();
-                  useStore.getState().previewTransform(ent.key, { scale: ent.scale * (e.deltaY < 0 ? 1.06 : 0.94) });
+                  const scale = Math.max(10, Math.min(300, ent.scale * (e.deltaY < 0 ? 1.06 : 0.94)));
+                  useStore.getState().previewTransform(ent.key, { scale, y: ent.y + (scale - ent.scale) / 2 });
                 }}
                 title="Перетащите, чтобы переместить · колесо — высота"
               >
@@ -309,13 +313,13 @@ export function StagePreview() {
               <EditableRange label="Позиция X" value={selEnt.x} min={-20} max={120} unit="%" onChange={x => s.previewTransform(selEnt.key, { x })} />
               <EditableRange label="Позиция Y" value={selEnt.y} min={-20} max={120} unit="%" onChange={y => s.previewTransform(selEnt.key, { y })} />
               <EditableRange label="Ширина" value={selEnt.widthScale ?? 100} min={10} max={300} unit="%" onChange={widthScale => s.previewTransform(selEnt.key, { widthScale })} />
-              <EditableRange label="Высота" value={selEnt.scale} min={10} max={300} unit="%" onChange={scale => s.previewTransform(selEnt.key, { scale })} />
+              <EditableRange label="Высота" value={selEnt.scale} min={10} max={300} unit="%" onChange={scale => s.previewTransform(selEnt.key, { scale, y: selEnt.y + (scale - selEnt.scale) / 2 })} />
               <div className="col-span-2">
                 <EditableRange label="Поворот" value={selEnt.rotation ?? 0} min={-180} max={180} unit="°" onChange={rotation => s.previewTransform(selEnt.key, { rotation })} />
               </div>
             </div>
             <button className="btn w-full justify-center !text-[11px]"
-              onClick={() => s.previewTransform(selEnt.key, { widthScale: 100, scale: 100, rotation: 0 })}>
+              onClick={() => s.previewTransform(selEnt.key, { widthScale: 100, scale: 100, y: selEnt.y + (100 - selEnt.scale) / 2, rotation: 0 })}>
               Сбросить трансформацию
             </button>
           </div>
