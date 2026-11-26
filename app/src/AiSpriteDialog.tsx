@@ -311,27 +311,6 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
               }}><Server size={13} /> Загрузить модель</button>
             </div>
 
-            <div className="rounded-xl border border-ink-700 p-3 space-y-2 bg-ink-850/60">
-              <div className="text-[10px] uppercase tracking-widest text-mute font-bold">Локальный сервер генерации</div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                <label className="block">
-                  <span className="block text-[10px] text-mute mb-1">Endpoint</span>
-                  <input className="input font-mono !text-[11px]" value={cfg.endpoint} onChange={e => patch({ endpoint: e.target.value })} />
-                </label>
-                <label className="block">
-                  <span className="block text-[10px] text-mute mb-1">Model ID</span>
-                  <input className="input font-mono !text-[11px]" value={cfg.modelId} onChange={e => patch({ modelId: e.target.value })} />
-                </label>
-                <label className="block">
-                  <span className="block text-[10px] text-mute mb-1">Путь к весам (на сервере)</span>
-                  <input className="input font-mono !text-[11px]" placeholder="по умолчанию из окружения сервера" value={cfg.modelPath} onChange={e => patch({ modelPath: e.target.value })} />
-                </label>
-              </div>
-              <div className="text-[10.5px] text-mute leading-snug">
-                Модель <span className="font-mono text-paper">{cfg.modelId}</span> запускается локально через <span className="font-mono">ai-server/server.py</span> (FastAPI + diffusers/ONNX).
-                Если сервер или веса недоступны, «Локальный рендер» соберёт спрайт из палитры персонажа без модели — кнопка «Применить» работает в обоих случаях.
-              </div>
-            </div>
           </div>
         </div>
       </div>
