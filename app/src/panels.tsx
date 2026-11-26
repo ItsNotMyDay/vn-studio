@@ -1430,7 +1430,7 @@ export function Inspector() {
               </span>
               <div className="flex-1" />
               <span className="chip border-ink-600 text-mute">
-                {s.project.characters.find(c => c.id === d.characterId)?.name ?? '???'}
+                {s.project.characters.find(c => c.id === d.characterId)?.name ?? '???'} · {EXPR_RU[d.expression ?? 'neutral'] ?? 'спокойствие'}
               </span>
               <button className="btn !px-2" disabled={suggesting} onClick={() => setSugPhase(null)} title="Закрыть"><X size={14} /></button>
             </div>
