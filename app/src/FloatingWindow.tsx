@@ -110,7 +110,7 @@ export function FloatingWindow({
     // minimized dock keeps its current state because open does not change.
     setMinimized(false);
     setMaximized(true);
-    if (!minimized) bringToFront();
+    bringToFront();
     return () => {
       closeFloatingWindow(id);
       removeMinimizedWindow(id);
