@@ -8,9 +8,17 @@ import shutil
 import threading
 import uuid
 import re
+import time
 import urllib.error
 import urllib.request
 from typing import Optional, Literal
+
+_BOOT_STARTED = time.perf_counter()
+
+def _boot_mark(stage: str) -> None:
+    print(f"[startup +{time.perf_counter() - _BOOT_STARTED:.2f}s] {stage}", flush=True)
+
+_boot_mark("Python standard imports ready")
 
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
 if os.name != "nt":
@@ -21,9 +29,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+_boot_mark("FastAPI and Pydantic imported")
 
 from compatibility import build_compatibility_report, get_hardware_report
 from audio_runtime import AUDIO_RUNTIME
+_boot_mark("VN Studio server modules imported")
 
 MODEL_ID_DEFAULT = os.environ.get("VN_MODEL_ID", "qwen_image_2.1_turbo_int8_convrot")
 MODEL_PATH_DEFAULT = os.environ.get("VN_MODEL_PATH", "")
@@ -1320,6 +1330,7 @@ def worker():
                 STATE["error"] = str(e)
 
 threading.Thread(target=worker, daemon=True).start()
+_boot_mark("Background worker ready; registering HTTP routes")
 
 def enqueue(kind, req, warnings: Optional[list[str]] = None) -> str:
     jid = uuid.uuid4().hex[:12]
@@ -1334,6 +1345,11 @@ def enqueue(kind, req, warnings: Optional[list[str]] = None) -> str:
 # ============================================================
 # HTTP API: image generation
 # ============================================================
+
+@app.on_event("startup")
+def _log_server_ready():
+    _boot_mark("HTTP API ready and accepting requests")
+
 
 @app.get("/health")
 def health():
