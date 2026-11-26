@@ -30,6 +30,8 @@ export function AiSpriteAssetDialog({ open, onClose }: { open: boolean; onClose:
   const s = useStore();
   const [cfg, setCfg] = useState<AiSettings>(loadAiSettings());
   const [aspect, setAspect] = useState('3:4');
+  const [widthInput, setWidthInput] = useState(String(loadAiSettings().width));
+  const [heightInput, setHeightInput] = useState(String(loadAiSettings().height));
   const [prompt, setPrompt] = useState('anime visual novel sprite, single isolated subject, centered composition, clean lineart, detailed rendering, transparent background, no scenery');
   const [name, setName] = useState('');
   const [phase, setPhase] = useState<Phase>('idle');
@@ -70,6 +72,8 @@ export function AiSpriteAssetDialog({ open, onClose }: { open: boolean; onClose:
     setMessage('');
     setName('');
     setResult(null);
+    setWidthInput(String(cfg.width));
+    setHeightInput(String(cfg.height));
     const matching = ASPECT_PRESETS.find(p => p.width === cfg.width && p.height === cfg.height);
     setAspect(matching?.id ?? 'custom');
     aiHealth(endpoint).then(h => {
@@ -96,8 +100,8 @@ export function AiSpriteAssetDialog({ open, onClose }: { open: boolean; onClose:
 
   const generate = async (seed?: number, quantization?: LocalQuantizationMode) => {
     const requestedSeed = typeof seed === 'number' && Number.isFinite(seed) ? seed : undefined;
-    const width = normalizeDimension(cfg.width);
-    const height = normalizeDimension(cfg.height);
+    const width = normalizeDimension(Number(widthInput));
+    const height = normalizeDimension(Number(heightInput));
     setResult(null);
     setMessage('');
     setProgress(0);
@@ -198,7 +202,23 @@ export function AiSpriteAssetDialog({ open, onClose }: { open: boolean; onClose:
   const selectAspect = (value: string) => {
     setAspect(value);
     const preset = ASPECT_PRESETS.find(p => p.id === value);
-    if (preset) patch({ width: preset.width, height: preset.height });
+    if (preset) {
+      setWidthInput(String(preset.width));
+      setHeightInput(String(preset.height));
+      patch({ width: preset.width, height: preset.height });
+    }
+  };
+
+  const commitWidth = () => {
+    const width = normalizeDimension(Number(widthInput));
+    setWidthInput(String(width));
+    patch({ width });
+  };
+
+  const commitHeight = () => {
+    const height = normalizeDimension(Number(heightInput));
+    setHeightInput(String(height));
+    patch({ height });
   };
 
   if (!open) return null;
@@ -293,8 +313,9 @@ export function AiSpriteAssetDialog({ open, onClose }: { open: boolean; onClose:
                       min={256}
                       max={2048}
                       step={8}
-                      value={cfg.width}
-                      onChange={e => { setAspect('custom'); patch({ width: normalizeDimension(Number(e.target.value)) }); }}
+                      value={widthInput}
+                      onChange={e => { setAspect('custom'); setWidthInput(e.target.value); }}
+                      onBlur={commitWidth}
                     />
                   </label>
                   <label className="block min-w-0">
@@ -305,8 +326,9 @@ export function AiSpriteAssetDialog({ open, onClose }: { open: boolean; onClose:
                       min={256}
                       max={2048}
                       step={8}
-                      value={cfg.height}
-                      onChange={e => { setAspect('custom'); patch({ height: normalizeDimension(Number(e.target.value)) }); }}
+                      value={heightInput}
+                      onChange={e => { setAspect('custom'); setHeightInput(e.target.value); }}
+                      onBlur={commitHeight}
                     />
                   </label>
                 </div>
