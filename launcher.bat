@@ -87,6 +87,14 @@ if /I "%VN_SERVER_ONLY%"=="1" (
 
 if "%APP_LAUNCHED%"=="1" goto app_started
 
+:: Сервер мог быть запущен до открытия лаунчера — в этом случае тоже открываем Release exe.
+if exist "%APP_EXE%" (
+    echo Запуск готового Release приложения: %APP_EXE% >> "%ROOT_DIR%launcher.log"
+    start "" "%APP_EXE%"
+    set "APP_LAUNCHED=1"
+    goto app_started
+)
+
 :: Release exe отсутствует — оставляем удобный резервный режим разработчика.
 echo Release exe не найден. Запуск Tauri в режиме разработки... >> "%ROOT_DIR%launcher.log"
 cd /d "%APP_DIR%"
