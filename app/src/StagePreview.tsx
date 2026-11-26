@@ -3,7 +3,6 @@ import { X, MousePointer2, LocateFixed, Move } from 'lucide-react';
 import { useStore, KIND_META, type NodeKind } from './store';
 import { Backdrop, EntityView } from './stage';
 import { FloatingWindow } from './FloatingWindow';
-import { isFloatingWindowActive } from './windowFocus';
 
 interface DragState {
   key: string;
@@ -24,14 +23,6 @@ export function StagePreview() {
   const boxRef = useRef<HTMLDivElement>(null);
   const [sel, setSel] = useState<string | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
-
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isFloatingWindowActive('entity-stage-preview')) useStore.getState().closePreview();
-    };
-    window.addEventListener('keydown', h);
-    return () => window.removeEventListener('keydown', h);
-  }, []);
 
   useEffect(() => {
     if (!drag) return;
