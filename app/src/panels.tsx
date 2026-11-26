@@ -529,9 +529,14 @@ export function Sidebar() {
 
             <div className="flex items-center justify-between px-1 pt-2">
               <span className="text-[10px] uppercase tracking-wider text-mute">Звуковые эффекты</span>
-              <button className="btn !px-2 !py-1" title="Создать щелчок, уведомление или тон" onClick={() => setSoundBuilderOpen(true)}>
-                <Sparkles size={12} /> Создать звук
-              </button>
+              <div className="flex gap-1">
+                <button className="btn !px-2 !py-1" title="Создать щелчок, уведомление или тон" onClick={() => setSoundBuilderOpen(true)}>
+                  <Sparkles size={12} /> Создать звук
+                </button>
+                <UploadButton accept="audio/*" title="Загрузить звуковой эффект" onFile={(f: File) => s.uploadTrack(f, 'effect')}>
+                  <Upload size={12} /> Загрузить
+                </UploadButton>
+              </div>
             </div>
             {soundTracks.map(t => <TrackRow key={t.id} t={t} />)}
             {soundTracks.length === 0 && <div className="text-[11px] text-mute px-2 py-1.5">Коротких звуков пока нет. Создай первый сигнал.</div>}
@@ -663,15 +668,17 @@ function BackgroundField({ nodeId, value }: { nodeId: string; value?: string }) 
   );
 }
 
-function MusicField({ nodeId, value }: { nodeId: string; value?: string }) {
+function MusicField({ nodeId, value, mode = 'music' }: { nodeId: string; value?: string; mode?: 'music' | 'effect' }) {
   const s = useStore();
-  const tr = s.project.tracks.find(t => t.id === value);
+  const tracks = s.project.tracks.filter(track => (track.mode ?? 'music') === mode);
+  const tr = tracks.find(t => t.id === value);
   return (
     <Field label="Трек">
       <div className="flex items-center gap-2">
         <button className="btn !px-2" title="Прослушать" onClick={() => tr && previewTrack(tr)}><Play size={13} /></button>
         <select className="select" value={value ?? ''} onChange={e => s.updateNodeData(nodeId, { track: e.target.value })}>
-          {s.project.tracks.map(t => <option key={t.id} value={t.id}>{t.name}{t.assetId ? ' · файл' : ''}</option>)}
+          <option value="">{mode === 'effect' ? '— эффект не выбран —' : '— музыка не выбрана —'}</option>
+          {tracks.map(t => <option key={t.id} value={t.id}>{t.name}{t.assetId ? ' · файл' : ''}</option>)}
         </select>
       </div>
     </Field>
@@ -1147,19 +1154,19 @@ export function Inspector() {
                   <button
                     className="btn flex-1 justify-center"
                     style={(d.mode ?? 'music') !== 'effect' ? { borderColor: '#ff6b3d', color: '#ff6b3d' } : {}}
-                    onClick={() => s.updateNodeData(node.id, { mode: 'music' })}
+                    onClick={() => s.updateNodeData(node.id, { mode: 'music', track: (s.project.tracks.find(track => (track.mode ?? 'music') === 'music')?.id ?? '') })}
                   >
                     Музыка
                   </button>
                   <button
                     className="btn flex-1 justify-center"
                     style={(d.mode ?? 'music') === 'effect' ? { borderColor: '#9dff57', color: '#9dff57' } : {}}
-                    onClick={() => s.updateNodeData(node.id, { mode: 'effect' })}
+                    onClick={() => s.updateNodeData(node.id, { mode: 'effect', track: (s.project.tracks.find(track => track.mode === 'effect')?.id ?? '') })}
                   >
                     Эффект
                   </button>
                 </div>
-                <MusicField nodeId={node.id} value={d.track} />
+                <MusicField nodeId={node.id} value={d.track} mode={(d.mode ?? 'music') === 'effect' ? 'effect' : 'music'} />
                 {(d.mode ?? 'music') !== 'effect' ? (
                   <div className="text-[11px] text-mute leading-snug">
                     Цикличная музыка не имеет синего выхода: подключите её оранжевым портом ♫ снизу любой ноды сюжета, а рыжим портом «стоп при входе в» укажите, где она закончится.
@@ -1846,7 +1853,8 @@ function AiModelsPanel() {
           </button>
         </div>
       )}
-      <div className="space-y-2">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-stretch">
+      <div className="rounded-xl border border-ink-700 bg-ink-900/35 p-3 min-w-0 space-y-2">
         <span className="block text-[10px] text-mute">Модель генерации изображений</span>
         <div className="flex gap-1.5">
 <select
@@ -1887,7 +1895,7 @@ function AiModelsPanel() {
         </div>
       </div>
 
-      <div className="border-t border-ink-700 pt-2 space-y-2">
+      <div className="rounded-xl border border-ink-700 bg-ink-900/35 p-3 min-w-0 space-y-2">
         <span className="block text-[10px] text-mute">Языковая модель (LLM)</span>
         <div className="flex gap-1.5">
           <select
@@ -1972,7 +1980,7 @@ function AiModelsPanel() {
         )}
       </div>
 
-      <div className="border-t border-ink-700 pt-2 space-y-2">
+      <div className="rounded-xl border border-ink-700 bg-ink-900/35 p-3 min-w-0 space-y-2">
         <div className="flex items-center gap-2">
           <AudioLines size={14} className="text-mute" />
           <span className="text-[10px] text-mute">Аудиомодель · ACE-Step 1.5</span>
@@ -2018,6 +2026,7 @@ function AiModelsPanel() {
         <div className="text-[10px] text-mute leading-snug">
           ACE-Step работает в отдельном Python-окружении, не затрагивая зависимости LLM и генерации изображений. Модель автоматически подбирает профиль под оборудование; для фоновой музыки и музыкальных акцентов.
         </div>
+      </div>
       </div>
 
       <div className="border-t border-ink-700 pt-2 flex flex-wrap items-center gap-1.5">

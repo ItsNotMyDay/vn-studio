@@ -284,7 +284,21 @@ export function LlmChat({ open: isOpen, onOpenChange: setIsOpen }: LlmChatProps)
     push('Изменения на холсте отменены (один шаг undo).');
   };
 
-  if (!isOpen) return null;
+  const dotColor = !status.online ? '#ff5470' : status.loaded ? '#9dff57' : '#ffb454';
+
+  if (!isOpen) {
+    return (
+      <button
+        className="fixed bottom-4 right-4 z-[60] btn btn-primary !px-3 !py-2 shadow-2xl opacity-35 hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+        onClick={() => setIsOpen(true)}
+        title="AI-консультант"
+        aria-label="Открыть AI-консультант"
+      >
+        <span className="w-2 h-2 rounded-full" style={{ background: dotColor, boxShadow: `0 0 8px ${dotColor}` }} />
+        <MessageSquare size={16} /> Консультант
+      </button>
+    );
+  }
 
   return (
     <FloatingWindow id="ai-consultant" title="AI-консультант" open={isOpen} onClose={() => setIsOpen(false)} width={460} height={600}>
