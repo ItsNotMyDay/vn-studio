@@ -11,7 +11,7 @@ use std::{
 };
 use tauri::{AppHandle, Emitter, Manager};
 
-const AI_SERVER_REVISION: &str = "6a774bf99fa336e55cfa1f913a20eaba28a8d857";
+const AI_SERVER_REVISION: &str = "33faa2c4066f514ed250d12b931eb0e32733f391";
 const UV_VERSION: &str = "0.13.10";
 const UV_WINDOWS_X64_URL: &str = "https://releases.astral.sh/github/uv/releases/download/0.13.10/uv-x86_64-pc-windows-msvc.zip";
 const UV_WINDOWS_X64_SHA256: &str =
