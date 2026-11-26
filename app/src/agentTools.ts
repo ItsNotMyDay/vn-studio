@@ -22,7 +22,7 @@ update_node {id, patch} — ИЗМЕНИТЬ НАСТРОЙКИ УЖЕ СУЩЕ�
 {"tool":"update_node","args":{"id":"n_variable","patch":{"charId":"c_alice","key":"trust","varType":"int","op":"add","value":2}}}
 
 ДОПУСТИМЫЕ ПОЛЯ update_node ПО ТИПАМ:
-- dialogue: characterId (id персонажа), expression (neutral|smile|angry|sad|surprised), text (текст реплики).
+- dialogue: replies (массив последовательных реплик {id, characterId, expression, text}); characterId/expression/text также поддерживаются как сокращённая запись для последней реплики. Каждая реплика проигрывается по очереди внутри одной ноды.
 - choice: mode (menu|condition), prompt (вопрос меню), options (массив строк или объектов {id,text}), condCharId (id персонажа для проверки), condKey (имя его переменной), conditions (массив объектов {id,op,value}, op: >|>=|==|<=|<|!=).
 - variable: charId (id персонажа), key (имя переменной), varType (string|int|float|bool), op (для string: set|concat; int/float: set|add|sub|mul; bool: set|toggle|and|or), value.
 - background: bg (id фона), fx (none|fade|slide-left|slide-right|slide-up|slide-down|zoom|blur), duration (секунды 0.1–3).
