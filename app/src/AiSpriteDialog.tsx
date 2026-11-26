@@ -194,7 +194,8 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
   const previewUrl = result?.url ?? currentUrl;
 
   return (
-    <FloatingWindow id="character-sprite-generator" title="AI-спрайт персонажа" open={!!target && !!c} onClose={onClose} width={1040} height={760}>
+    <>
+      <FloatingWindow id="character-sprite-generator" title="AI-спрайт персонажа" open={!!target && !!c} onClose={onClose} width={1040} height={760}>
       <div className="panel border rounded-2xl w-[min(1040px,96vw)] max-h-[92vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
         <div data-floating-handle className="sticky top-0 z-10 flex items-center gap-2 px-4 py-3 border-b border-ink-700 panel cursor-move">
           <Sparkles size={15} style={{ color: 'var(--accent)' }} />
@@ -328,6 +329,6 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
           else if (action?.kind === 'generate') void generate(action.seed, mode);
         }}
       />
-    </div>
+    </>
   );
 }
