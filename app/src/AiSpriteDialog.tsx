@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { FloatingWindow } from './FloatingWindow';
 import { Sparkles, X, RefreshCw, Check, Dice5, Server, Download, Wand2, AlertTriangle, Loader2 } from 'lucide-react';
 import { useStore } from './store';
 import { useAssetURL } from './assets';
@@ -193,9 +194,9 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
   const previewUrl = result?.url ?? currentUrl;
 
   return (
-    <div className="fixed inset-0 z-[75] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
+    <FloatingWindow id="character-sprite-generator" title="AI-спрайт персонажа" open={!!target && !!c} onClose={onClose} width={1040} height={760}>
       <div className="panel border rounded-2xl w-[min(1040px,96vw)] max-h-[92vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
-        <div className="sticky top-0 z-10 flex items-center gap-2 px-4 py-3 border-b border-ink-700 panel">
+        <div data-floating-handle className="sticky top-0 z-10 flex items-center gap-2 px-4 py-3 border-b border-ink-700 panel cursor-move">
           <Sparkles size={15} style={{ color: 'var(--accent)' }} />
           <span className="font-display font-bold text-[13px] uppercase tracking-widest">AI-спрайт</span>
           <span className="chip" style={{ borderColor: c.color, color: c.color }}>{c.name}</span>
@@ -313,7 +314,7 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
 
           </div>
         </div>
-      </div>
+      </FloatingWindow>
       <QuantizationDialog
         open={quantizationOpen}
         modelName={cfg.modelId}
