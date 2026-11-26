@@ -1,13 +1,86 @@
 <!doctype html>
-<html lang="en">
+<html lang="ru">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>app</title>
+    <meta name="theme-color" content="#07080c" />
+    <title>VN Studio</title>
+    <style>
+      html, body, #root {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: #07080c;
+      }
+      body {
+        color: #f4ead8;
+        font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+      }
+      #startup-screen {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        background:
+          radial-gradient(42% 38% at 50% 42%, rgba(139,123,255,.12), transparent 72%),
+          #07080c;
+      }
+      .startup-content {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 16px;
+      }
+      .startup-logo {
+        width: 54px;
+        height: 54px;
+        display: grid;
+        place-items: center;
+        border-radius: 16px;
+        color: #16090a;
+        font-size: 25px;
+        font-weight: 900;
+        background: linear-gradient(135deg, #ffb454, #ff4d8d);
+        box-shadow: 0 8px 34px rgba(255,77,141,.22);
+      }
+      .startup-title {
+        font-size: 15px;
+        font-weight: 800;
+        letter-spacing: .18em;
+      }
+      .startup-subtitle {
+        margin-top: -10px;
+        color: #8d97b5;
+        font-size: 11px;
+        letter-spacing: .06em;
+      }
+      .startup-spinner {
+        width: 18px;
+        height: 18px;
+        margin-top: 5px;
+        border: 2px solid rgba(255,180,84,.18);
+        border-top-color: #ffb454;
+        border-radius: 50%;
+        animation: startup-spin .8s linear infinite;
+      }
+      @keyframes startup-spin { to { transform: rotate(360deg); } }
+      @media (prefers-reduced-motion: reduce) {
+        .startup-spinner { animation: none; }
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div id="startup-screen" role="status" aria-label="Запуск VN Studio">
+        <div class="startup-content">
+          <div class="startup-logo" aria-hidden="true">V</div>
+          <div class="startup-title">VN STUDIO</div>
+          <div class="startup-subtitle">Подготавливаем рабочее пространство</div>
+          <div class="startup-spinner" aria-hidden="true"></div>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
