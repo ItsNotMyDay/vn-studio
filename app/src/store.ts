@@ -466,7 +466,9 @@ interface Store {
   activeProjectId: string | null;
   projectsMeta: ProjectMeta[];
   compileOpen: boolean;
+  compiledPreviewOpen: boolean;
   setCompileOpen: (v: boolean) => void;
+  setCompiledPreviewOpen: (v: boolean) => void;
   createEmptyProject: () => void;
   openProject: (id: string) => void;
   closeToLauncher: () => void;
@@ -565,7 +567,7 @@ interface Store {
   buildRichContext: (nodeId: string) => Promise<RichContext>;
   indexCurrentChapter: () => Promise<void>;
 
-  save: () => void;
+  save: () => boolean;
   exportJSON: () => void;
   exportScript: () => void;
   restoreDemoProject: () => void;
@@ -986,6 +988,7 @@ export const useStore = create<Store>((set, get) => {
     lastProjectId: lastId,
     projectsMeta: listProjects(),
     compileOpen: false,
+    compiledPreviewOpen: false,
 
     setRf: rf => set({ rf }),
     setDirector: patch => {
@@ -1520,16 +1523,27 @@ export const useStore = create<Store>((set, get) => {
 
     save: () => {
       const id = get().activeProjectId;
-      if (!id) { get().toast('Проект не открыт'); return; }
+      if (!id) { get().toast('Проект не открыт'); return false; }
       try {
-        writeProject(id, get().project);
+        const project = get().project;
+        writeProject(id, project);
+        const saved = readProject(id);
+        if (!saved || JSON.stringify(saved) !== JSON.stringify(project)) {
+          get().toast('Не удалось сохранить проект (хранилище переполнено)');
+          return false;
+        }
         set({ projectsMeta: listProjects() });
         get().toast('Проект сохранён');
         audioEngine.audioEnsure?.();
         audioEngine.audioTick?.(880, 0.07, 0.07);
-      } catch { get().toast('Не удалось сохранить проект (хранилище переполнено)'); }
+        return true;
+      } catch {
+        get().toast('Не удалось сохранить проект (хранилище переполнено)');
+        return false;
+      }
     },
         setCompileOpen: compileOpen => set({ compileOpen }),
+    setCompiledPreviewOpen: compiledPreviewOpen => set({ compiledPreviewOpen }),
     refreshProjects: () => set({ projectsMeta: listProjects() }),
     createEmptyProject: () => {
       const st = uid('n'), en = uid('n');
