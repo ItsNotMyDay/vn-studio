@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import {
-  Play, MessageSquare, GitBranch, Sigma, Image as ImageIcon, Music, UserRound, Square as StopIcon,
+  MessageSquare, GitBranch, Sigma, Image as ImageIcon, Music, UserRound, Square as StopIcon,
   Move, Eye, EyeOff, Type, Hash, Percent, ToggleLeft, Timer, Navigation
 } from 'lucide-react';
 import {
@@ -39,7 +39,7 @@ function JumpNode({ id, data, selected }: any) {
 
 /* --------------------------------- helpers --------------------------------- */
 
-function Card({ kind, selected, children, width = 224, id, noPlay }: any) {
+function Card({ kind, selected, children, width = 224 }: any) {
   const m = KIND_META[kind as NodeKind];
   return (
     <div
@@ -50,17 +50,6 @@ function Card({ kind, selected, children, width = 224, id, noPlay }: any) {
         boxShadow: selected ? `0 0 0 1px ${m.color}, 0 10px 26px ${m.color}33` : '0 6px 18px #00000066',
       }}
     >
-      {!noPlay && id && (
-        <button
-          className="absolute -top-2.5 -right-2.5 z-10 w-6 h-6 rounded-full border border-ink-950 flex items-center justify-center shadow-lg hover:scale-110 transition-transform"
-          style={{ background: 'var(--accent)', color: '#16090a' }}
-          title="Предпросмотр с этой ноды (история до неё будет проиграна)"
-          onPointerDown={e => e.stopPropagation()}
-          onClick={e => { e.stopPropagation(); useStore.getState().playFrom(id); }}
-        >
-          <Play size={11} />
-        </button>
-      )}
       <div className="flex items-center gap-1.5 px-2.5 pt-2 pb-1">
         <span className="w-2 h-2 rounded-full shrink-0" style={{ background: m.color, boxShadow: `0 0 6px ${m.color}` }} />
         <span className="text-[10px] font-bold uppercase tracking-wider truncate" style={{ color: m.color }}>{m.label}</span>
