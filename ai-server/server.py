@@ -39,10 +39,12 @@ _boot_mark("VN Studio server modules imported")
 
 MODEL_ID_DEFAULT = os.environ.get("VN_MODEL_ID", "qwen_image_2.1_turbo_int8_convrot")
 MODEL_PATH_DEFAULT = os.environ.get("VN_MODEL_PATH", "")
-SEARCH_DIRS = [os.environ.get("VN_MODELS_DIR", "C:\\models"), os.path.join(os.path.dirname(__file__), "models")]
+SERVER_DATA_DIR = os.path.abspath(os.environ.get("VN_SERVER_DATA_DIR", os.path.dirname(__file__)))
+MODELS_DIR_DEFAULT = os.path.abspath(os.environ.get("VN_MODELS_DIR", os.path.join(SERVER_DATA_DIR, "models")))
+SEARCH_DIRS = list(dict.fromkeys([MODELS_DIR_DEFAULT, os.path.join(os.path.dirname(__file__), "models")]))
 LOW_VRAM_GB = float(os.environ.get("VN_LOW_VRAM_GB", "10"))
 TOKENIZER_FALLBACK_REPO = os.environ.get("VN_TOKENIZER_REPO", "Qwen/Qwen-Image")
-LLM_PATH_DEFAULT = os.environ.get("VN_LLM_PATH", "C:\\models\\qwen3-14b")
+LLM_PATH_DEFAULT = os.environ.get("VN_LLM_PATH", "").strip()
 
 app = FastAPI(title="VN Studio local AI server")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -84,8 +86,8 @@ LLM_LOCK = threading.Lock()
 LLM_STATE = {"model": None, "tokenizer": None, "processor": None, "loaded": False,
              "path": None, "device": None, "adapter": None, "profile": None, "error": None}
 
-EMBED_PATH_DEFAULT = os.environ.get("VN_EMBED_PATH", "C:\\models\\e5-small")
-EMBED_INDEX_DIR = os.path.join(os.path.dirname(__file__), "embeddings")
+EMBED_PATH_DEFAULT = os.environ.get("VN_EMBED_PATH", "").strip()
+EMBED_INDEX_DIR = os.path.join(SERVER_DATA_DIR, "embeddings")
 os.makedirs(EMBED_INDEX_DIR, exist_ok=True)
 EMBED_LOCK = threading.RLock()
 EMBED_STATE = {"model": None, "tokenizer": None, "loaded": False, "error": None}
@@ -1301,6 +1303,8 @@ def worker():
                     job["stage"] = "Generating"
                     job["progress"] = 0.5
                     if not LLM_STATE["loaded"]:
+                        if not LLM_PATH_DEFAULT:
+                            raise RuntimeError("Сначала выберите локальную языковую модель в настройках VN Studio или подключите API-модель.")
                         _ensure_transformers_ready()
                         compatibility = build_compatibility_report(LLM_PATH_DEFAULT, "llm")
                         job["warnings"] = _compatibility_warnings(compatibility)
@@ -1385,6 +1389,8 @@ def models_compatibility(req: ModelCompatibilityReq):
             path = req.model_path or MODEL_PATH_DEFAULT
     elif req.model_kind == "llm":
         path = req.model_path or LLM_PATH_DEFAULT
+        if not path:
+            raise HTTPException(400, "Выберите локальную языковую модель для проверки совместимости.")
     else:
         raise HTTPException(400, "model_kind должен быть llm или image")
     _ensure_transformers_ready()
@@ -1448,6 +1454,8 @@ def job_cancel(job_id: str):
 def llm_load(req: Optional[LoadReq] = None):
     request = req or LoadReq()
     path = request.model_path or LLM_PATH_DEFAULT
+    if not path:
+        raise HTTPException(400, "Выберите локальную языковую модель в настройках VN Studio.")
     if not os.path.isdir(path):
         raise HTTPException(404, detail=f"LLM folder not found: {path}")
     _ensure_transformers_ready()
