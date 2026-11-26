@@ -6,7 +6,7 @@ import { FloatingWindow } from './FloatingWindow';
 
 interface DragState {
   key: string;
-  mode: 'move' | 'resize-height' | 'resize-width';
+  mode: 'move' | 'resize-height' | 'resize-width' | 'rotate';
   sx: number;
   sy: number;
   ox: number;
@@ -16,6 +16,9 @@ interface DragState {
   hpx: number;
   wpx: number;
   rotation: number;
+  centerX: number;
+  centerY: number;
+  pointerAngle: number;
 }
 
 interface EditableRangeProps {
@@ -110,25 +113,34 @@ export function StagePreview() {
     const mv = (e: PointerEvent) => {
       const rect = boxRef.current?.getBoundingClientRect();
       if (!rect) return;
+      const dx = e.clientX - drag.sx;
+      const dy = e.clientY - drag.sy;
+      const angle = drag.rotation * Math.PI / 180;
       if (drag.mode === 'move') {
-        const nx = drag.ox + ((e.clientX - drag.sx) / rect.width) * 100;
-        const ny = drag.oy + ((e.clientY - drag.sy) / rect.height) * 100;
+        const nx = drag.ox + (dx / rect.width) * 100;
+        const ny = drag.oy + (dy / rect.height) * 100;
         useStore.getState().previewTransform(drag.key, { x: nx, y: ny });
+      } else if (drag.mode === 'resize-height') {
+        // The top handle is attached to the real, scaled edge of the sprite.
+        // Project screen movement onto its local vertical axis (clockwise CSS rotation).
+        const localUp = dx * Math.sin(angle) - dy * Math.cos(angle);
+        const deltaScale = (localUp * 2 / rect.height) * 100;
+        const scale = Math.max(10, Math.min(300, drag.os + deltaScale));
+        // Keep the geometric center fixed while both edges move symmetrically.
+        const y = drag.oy + (scale - drag.os) / 2;
+        useStore.getState().previewTransform(drag.key, { scale, y });
+      } else if (drag.mode === 'resize-width') {
+        const localRight = dx * Math.cos(angle) + dy * Math.sin(angle);
+        const factor = Math.max(10 / drag.ow, 1 + localRight / drag.wpx);
+        useStore.getState().previewTransform(drag.key, { widthScale: drag.ow * factor });
       } else {
-        const dx = e.clientX - drag.sx;
-        const dy = e.clientY - drag.sy;
-        const angle = drag.rotation * Math.PI / 180;
-        if (drag.mode === 'resize-height') {
-          // Project pointer movement onto the entity's local vertical axis.
-          const localUp = -(dx * Math.sin(angle) + dy * Math.cos(angle));
-          const factor = Math.max(0.15, (drag.hpx + localUp) / drag.hpx);
-          useStore.getState().previewTransform(drag.key, { scale: drag.os * factor });
-        } else {
-          // Project pointer movement onto the entity's local horizontal axis.
-          const localRight = dx * Math.cos(angle) + dy * Math.sin(angle);
-          const factor = Math.max(0.15, (drag.wpx + localRight) / drag.wpx);
-          useStore.getState().previewTransform(drag.key, { widthScale: drag.ow * factor });
-        }
+        const currentAngle = Math.atan2(e.clientY - drag.centerY, e.clientX - drag.centerX);
+        const delta = Math.atan2(
+          Math.sin(currentAngle - drag.pointerAngle),
+          Math.cos(currentAngle - drag.pointerAngle),
+        ) * 180 / Math.PI;
+        const rotation = Math.max(-180, Math.min(180, drag.rotation + delta));
+        useStore.getState().previewTransform(drag.key, { rotation });
       }
     };
     const up = () => setDrag(null);
@@ -155,16 +167,22 @@ export function StagePreview() {
     e.preventDefault();
     const ent = preview.entities[key];
     const rect = boxRef.current?.getBoundingClientRect();
-    const item = (mode === 'move' ? e.currentTarget : e.currentTarget.parentElement) as HTMLElement | null;
+    const item = e.currentTarget.parentElement as HTMLElement | null;
     if (!ent || !rect) return;
+    const hpx = Math.max(24, (ent.scale / 100) * rect.height);
+    const widthScale = ent.widthScale ?? 100;
+    const wpx = Math.max(24, (item?.offsetWidth ?? 24) * widthScale / Math.max(10, ent.scale));
+    const rotation = ent.rotation ?? 0;
+    const centerX = rect.left + (ent.x / 100) * rect.width;
+    const centerY = rect.top + (ent.y / 100) * rect.height - hpx / 2;
+    const pointerAngle = Math.atan2(e.clientY - centerY, e.clientX - centerX);
     setSel(key);
     setDrag({
       key, mode,
       sx: e.clientX, sy: e.clientY,
-      ox: ent.x, oy: ent.y, os: ent.scale, ow: ent.widthScale ?? 100,
-      hpx: Math.max(24, (ent.scale / 100) * rect.height),
-      wpx: Math.max(24, (item?.offsetWidth ?? 24) * ((ent.widthScale ?? 100) / 100)),
-      rotation: ent.rotation ?? 0,
+      ox: ent.x, oy: ent.y, os: ent.scale, ow: widthScale,
+      hpx, wpx, rotation,
+      centerX, centerY, pointerAngle,
     });
   };
 
@@ -205,13 +223,16 @@ export function StagePreview() {
         {ents.map(ent => {
           const isSel = sel === ent.key;
           const isDrag = drag?.key === ent.key;
+          const scale = Math.max(10, ent.scale);
+          const widthFactor = (ent.widthScale ?? 100) / scale;
           return (
             <div
               key={ent.key}
-              className="absolute flex h-full w-max min-w-max items-end pointer-events-none"
+              className="absolute flex items-end w-max min-w-max pointer-events-none"
               style={{
                 left: `${ent.x}%`,
                 top: `${ent.y}%`,
+                height: `${ent.scale}%`,
                 transform: 'translate(-50%, -100%)',
                 zIndex: ent.z,
               }}
@@ -220,14 +241,15 @@ export function StagePreview() {
                 className={`relative h-full w-max min-w-max pointer-events-auto ${isSel ? 'outline outline-2 outline-offset-4 rounded' : ''}`}
                 style={{
                   outlineColor: isSel ? 'var(--accent)' : undefined,
-                  transform: `rotate(${ent.rotation ?? 0}deg) scaleX(${(ent.widthScale ?? 100) / 100}) scaleY(${ent.scale / 100})`,
-                  transformOrigin: 'bottom center',
+                  transform: `rotate(${ent.rotation ?? 0}deg) scaleX(${widthFactor})`,
+                  transformOrigin: 'center center',
                   cursor: isDrag && drag?.mode === 'move' ? 'grabbing' : 'grab',
                 }}
                 onPointerDown={e => startDrag(e, ent.key, 'move')}
                 onWheel={e => {
                   e.stopPropagation();
-                  useStore.getState().previewTransform(ent.key, { scale: ent.scale * (e.deltaY < 0 ? 1.06 : 0.94) });
+                  const scale = Math.max(10, Math.min(300, ent.scale * (e.deltaY < 0 ? 1.06 : 0.94)));
+                  useStore.getState().previewTransform(ent.key, { scale, y: ent.y + (scale - ent.scale) / 2 });
                 }}
                 title="Перетащите, чтобы переместить · колесо — высота"
               >
@@ -239,29 +261,29 @@ export function StagePreview() {
                   className="absolute -top-3 left-1/2 -translate-x-1/2 w-4 h-4 rounded border-2 border-ink-950 cursor-ns-resize pointer-events-auto transition-opacity"
                   style={{ background: 'var(--accent)', opacity: isSel ? 1 : 0.3 }}
                   onPointerDown={e => startDrag(e, ent.key, 'resize-height')}
-                  title="Тяните вдоль вертикальной оси спрайта, чтобы изменить высоту"
+                  title="Тяните вверх/вниз вдоль оси спрайта, чтобы изменить только высоту"
                 />
 
                 <div
                   className="absolute right-[-7px] top-1/2 -translate-y-1/2 w-4 h-4 rounded border-2 border-ink-950 cursor-ew-resize pointer-events-auto transition-opacity"
                   style={{ background: '#2ee6a8', opacity: isSel ? 1 : 0.3 }}
                   onPointerDown={e => startDrag(e, ent.key, 'resize-width')}
-                  title="Тяните вдоль горизонтальной оси спрайта, чтобы изменить ширину"
+                  title="Тяните вдоль горизонтальной оси спрайта, чтобы изменить только ширину"
+                />
+
+                <div
+                  className="pointer-events-none absolute left-1/2 -top-9 h-7 w-px -translate-x-1/2"
+                  style={{ background: 'var(--accent)', opacity: isSel ? 0.95 : 0.35 }}
+                />
+                <button
+                  type="button"
+                  className="absolute left-1/2 -top-[43px] h-5 w-5 -translate-x-1/2 rounded-full border-2 border-ink-950 bg-[var(--accent)] shadow-lg cursor-grab active:cursor-grabbing pointer-events-auto"
+                  style={{ opacity: isSel ? 1 : 0.4 }}
+                  onPointerDown={e => startDrag(e, ent.key, 'rotate')}
+                  title="Потяните кружок, чтобы вращать вокруг центра сущности"
+                  aria-label="Вращать сущность"
                 />
               </div>
-              {isSel && (
-                <div
-                  className="absolute left-1/2 -translate-x-1/2 chip !text-[10px] whitespace-nowrap font-mono pointer-events-none"
-                  style={{
-                    top: `calc(100% - ${ent.scale}% - 34px)`,
-                    borderColor: 'var(--accent)',
-                    color: 'var(--accent)',
-                    background: '#0b0e15dd',
-                  }}
-                >
-                  {ent.src.slice(0, 10)}
-                </div>
-              )}
             </div>
           );
         })}
@@ -291,13 +313,13 @@ export function StagePreview() {
               <EditableRange label="Позиция X" value={selEnt.x} min={-20} max={120} unit="%" onChange={x => s.previewTransform(selEnt.key, { x })} />
               <EditableRange label="Позиция Y" value={selEnt.y} min={-20} max={120} unit="%" onChange={y => s.previewTransform(selEnt.key, { y })} />
               <EditableRange label="Ширина" value={selEnt.widthScale ?? 100} min={10} max={300} unit="%" onChange={widthScale => s.previewTransform(selEnt.key, { widthScale })} />
-              <EditableRange label="Высота" value={selEnt.scale} min={10} max={300} unit="%" onChange={scale => s.previewTransform(selEnt.key, { scale })} />
+              <EditableRange label="Высота" value={selEnt.scale} min={10} max={300} unit="%" onChange={scale => s.previewTransform(selEnt.key, { scale, y: selEnt.y + (scale - selEnt.scale) / 2 })} />
               <div className="col-span-2">
                 <EditableRange label="Поворот" value={selEnt.rotation ?? 0} min={-180} max={180} unit="°" onChange={rotation => s.previewTransform(selEnt.key, { rotation })} />
               </div>
             </div>
             <button className="btn w-full justify-center !text-[11px]"
-              onClick={() => s.previewTransform(selEnt.key, { widthScale: 100, scale: 100, rotation: 0 })}>
+              onClick={() => s.previewTransform(selEnt.key, { widthScale: 100, scale: 100, y: selEnt.y + (100 - selEnt.scale) / 2, rotation: 0 })}>
               Сбросить трансформацию
             </button>
           </div>
@@ -318,8 +340,8 @@ export function StagePreview() {
       </div>
 
       <div className="h-8 shrink-0 flex items-center gap-3 px-3 border-t border-ink-700 panel text-[11px] text-mute">
-        <span>ЛКМ по сущности — перетащить</span>
-        <span>колесо / верхняя ручка — высота · правая ручка — ширина</span>
+        <span>ЛКМ — переместить</span>
+        <span>верхняя ручка — высота · правая — ширина · кружок — поворот по центру</span>
         <span>Esc — выйти из предпросмотра</span>
         <div className="flex-1" />
         {selEnt && (

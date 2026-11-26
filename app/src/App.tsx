@@ -322,17 +322,23 @@ function Shell() {
     >
       {s.activeProjectId ? (
         <>
-      <Toolbar onOpenConsultant={() => setConsultantOpen(true)} consultantOpen={consultantOpen} />
+      <Toolbar />
       <div className="flex-1 min-h-0 flex">
         <Sidebar />
         <Canvas />
-        {hasInspectorSelection && <Inspector />}
+        {hasInspectorSelection && !consultantOpen && <Inspector />}
+        <LlmChat
+          open={consultantOpen}
+          onOpenChange={open => {
+            setConsultantOpen(open);
+            if (open) s.setRightOpen(true);
+          }}
+        />
       </div>
       <StagePreview />
       <DirectorConsole />
       <PaletteDragGhost />
       <Toasts />
-      <LlmChat open={consultantOpen} onOpenChange={setConsultantOpen} />
       <CompileDialog open={s.compileOpen} onClose={() => s.setCompileOpen(false)} />
       <CompiledPreviewWindow open={s.compiledPreviewOpen} onClose={() => s.setCompiledPreviewOpen(false)} />
       
