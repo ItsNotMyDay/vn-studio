@@ -46,7 +46,8 @@ export function CompiledPreviewWindow({ open, onClose }: { open: boolean; onClos
             title="Предпросмотр скомпилированной визуальной новеллы"
             className="flex-1 min-h-0 w-full border-0 bg-ink-950"
             srcDoc={html}
-            sandbox="allow-scripts allow-forms allow-modals"
+            onFocus={() => import('./windowFocus').then(({ activateFloatingWindow }) => activateFloatingWindow('compiled-game-preview'))}
+            sandbox="allow-scripts allow-same-origin allow-forms allow-modals"
           />
         )}
       </div>
