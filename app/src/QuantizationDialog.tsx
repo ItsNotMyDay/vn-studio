@@ -5,11 +5,13 @@ import type { LocalQuantizationMode } from './ai';
 export function QuantizationDialog({
   open,
   modelName,
+  windowId = 'model-quantization',
   onSelect,
   onClose,
 }: {
   open: boolean;
   modelName?: string;
+  windowId?: string;
   onSelect: (mode: LocalQuantizationMode) => void;
   onClose: () => void;
 }) {
@@ -37,7 +39,7 @@ export function QuantizationDialog({
   ];
 
   return (
-    <FloatingWindow id="model-quantization" title="Режим загрузки модели" open={open} onClose={onClose} width={460} height={420}>
+    <FloatingWindow id={windowId} title="Режим загрузки модели" open={open} onClose={onClose} width={460} height={420}>
       <div className="panel border border-ink-600 rounded-2xl w-[min(460px,96vw)] p-4 shadow-2xl space-y-3" onClick={e => e.stopPropagation()}>
         <div data-floating-handle className="flex items-center gap-2 cursor-move">
           <Cpu size={17} style={{ color: 'var(--accent)' }} />
