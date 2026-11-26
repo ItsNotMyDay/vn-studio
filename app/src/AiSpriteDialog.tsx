@@ -315,6 +315,7 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
 
           </div>
         </div>
+      </div>
       </FloatingWindow>
       <QuantizationDialog
         open={quantizationOpen}
