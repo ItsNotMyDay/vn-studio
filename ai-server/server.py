@@ -1147,17 +1147,6 @@ def load_llm(path: str, quantization_mode: str = "none"):
     if quantization_mode in ("int4", "fp16") and not use_prequantized:
         cache_dir, cache_metadata, cache_hit = _quantization_cache_info(path, "llm", quantization_mode)
 
-    if quantization_mode == "int4" and not use_prequantized:
-        try:
-            kwargs["quantization_config"] = _llm_bnb_offload_config(
-                model_info, compute_dtype, torch
-            )
-        except Exception as exc:
-            raise RuntimeError(
-                "Не удалось включить INT4: установите совместимую версию bitsandbytes. "
-                + f"{type(exc).__name__}: {str(exc)[:240]}"
-            ) from exc
-
     profile.update(
         device=device,
         dtype="float16" if quantization_mode in ("int4", "fp16") else "auto",
