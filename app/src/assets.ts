@@ -85,11 +85,11 @@ export function downloadBlob(blob: Blob, filename: string): void {
   const anchor = document.createElement('a');
   const extension = blob.type.split('/')[1]?.split('+')[0] || 'png';
   const safeName = filename
-    .replace(/[<>:"/\\\\|?*\\u0000-\\u001f]/g, '-')
-    .replace(/\\s+/g, ' ')
+    .replace(/[<>:"\/\\|?*\u0000-\u001f]/g, '-')
+    .replace(/\s+/g, ' ')
     .trim() || 'vn-studio-image';
   anchor.href = url;
-  anchor.download = /\\.[a-z0-9]{2,5}$/i.test(safeName) ? safeName : `${safeName}.${extension}`;
+  anchor.download = /\.[a-z0-9]{2,5}$/i.test(safeName) ? safeName : safeName + '.' + extension;
   anchor.style.display = 'none';
   document.body.appendChild(anchor);
   anchor.click();
