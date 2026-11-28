@@ -58,7 +58,7 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
   useEffect(() => {
     if (!target || !c) return;
     setPrompt(buildSpritePrompt(c, target.expr, cfg, framing));
-  }, [target?.charId, target?.expr, framing, cfg.transparent, cfg.width, cfg.height, c?.name, c?.appearance, c?.hairStyle, c?.hair, c?.jacket, c?.skin, c?.expressionDescriptions?.[target.expr]]);
+  }, [target?.charId, target?.expr, framing, cfg.transparent, cfg.width, cfg.height, c?.name, c?.appearance, c?.hairStyle, c?.hair, c?.jacket, c?.skin, c?.expressionDescriptions?.[target?.expr ?? '']]);
 
   if (!target || !c) return null;
 
