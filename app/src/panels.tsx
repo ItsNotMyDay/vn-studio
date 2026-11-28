@@ -763,7 +763,7 @@ function CharacterEditor({ c }: { c: Character }) {
   const [newEmotionName, setNewEmotionName] = useState('');
   const [aiTarget, setAiTarget] = useState<{ charId: string; expr: string } | null>(null);
   const expressions = Array.from(new Set([...EXPR, ...(c.expressions ?? [])]));
-  const expressionSignature = expressions.join('\\u0000');
+  const expressionSignature = expressions.join('|');
 
   useEffect(() => {
     if (!expressions.includes(expr)) setExpr(expressions[0] ?? 'neutral');
@@ -827,7 +827,7 @@ function CharacterEditor({ c }: { c: Character }) {
           <button
             className="btn !px-2 !py-0.5"
             style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}
-            title={`AI-спрайт для эмоции «${EXPR_RU[expr]}»`}
+            title={`AI-спрайт для эмоции «${EXPR_RU[expr] || expr}»`}
             onClick={() => setAiTarget({ charId: c.id, expr })}
           >
             <Sparkles size={11} /> AI
