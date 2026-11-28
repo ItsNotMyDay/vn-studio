@@ -1411,14 +1411,17 @@ def _suggest_impl(req: LlmSuggestReq, cancel_check=None):
         "sad": ("грусть", "передай печаль, подавленность или уязвимость через тихую, сдержанную интонацию; не превращай реплику в весёлую, дерзкую или воодушевлённую"),
         "surprised": ("удивление", "передай неожиданность, изумление или растерянность через реакцию, вопросы, паузы или уточнения; не подменяй удивление злостью или радостью"),
     }
+    sprite_description = str(current_node.get("emotion_description") or "").strip()
     if requested_emotion_key in emotion_profiles:
         emotion = requested_emotion_key
         emotion_label, emotion_guidance = emotion_profiles[emotion]
+        if sprite_description:
+            emotion_guidance += f". Дополнительное описание выбранного спрайта: {sprite_description}"
     else:
         # Пользовательские имена спрайтов не должны сбрасываться в neutral.
         emotion = requested_emotion or "neutral"
         emotion_label = emotion
-        emotion_guidance = str(current_node.get("emotion_description") or "").strip()
+        emotion_guidance = sprite_description
         if not emotion_guidance:
             emotion_guidance = (
                 f"Интерпретируй название спрайта «{emotion}» как целевое настроение. "
