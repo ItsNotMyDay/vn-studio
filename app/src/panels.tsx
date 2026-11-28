@@ -823,7 +823,7 @@ function CharacterEditor({ c }: { c: Character }) {
 
       <div>
         <div className="flex items-center justify-between mb-1">
-          <span className="text-[10.5px] uppercase tracking-wider text-mute">Спрайты эмоций</span>
+          <span className="text-[10.5px] uppercase tracking-wider text-mute">Спрайты</span>
           <button
             className="btn !px-2 !py-0.5"
             style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}
@@ -847,14 +847,32 @@ function CharacterEditor({ c }: { c: Character }) {
             <Plus size={12} /> Добавить
           </button>
         </div>
-        <div className="flex gap-1.5 overflow-x-auto overflow-y-hidden pb-2">
+        <div
+          className="flex gap-1.5 overflow-x-auto overflow-y-hidden pb-2"
+          onWheel={e => {
+            if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+              e.preventDefault();
+              e.currentTarget.scrollLeft += e.deltaY;
+            }
+          }}
+        >
           {expressions.map(e => {
             const aid = c.sprites?.[e];
             const meta = c.spriteMeta?.[e];
             const label = EXPR_RU[e] || e;
             return (
-              <div key={e} className={`w-[88px] shrink-0 rounded-lg border p-1 space-y-1 ${expr === e ? 'border-ink-500 bg-ink-700' : 'border-ink-700 bg-ink-850'}`}>
+              <div key={e} className={`w-[calc((100%-24px)/5)] shrink-0 rounded-lg border p-1 space-y-1 ${expr === e ? 'border-ink-500 bg-ink-700' : 'border-ink-700 bg-ink-850'}`}>
                 <div className="relative">
+                  {(c.expressions ?? []).includes(e) && (
+                    <button
+                      className="absolute -top-1.5 -left-1.5 z-10 w-5 h-5 rounded-full flex items-center justify-center border border-ink-950 shadow-lg hover:scale-110 transition-transform"
+                      style={{ background: '#ef465f', color: '#fff' }}
+                      title={`Удалить эмоцию «${label}»`}
+                      onClick={event => { event.stopPropagation(); s.deleteCharacterExpression(c.id, e); }}
+                    >
+                      <Trash2 size={10} />
+                    </button>
+                  )}
                   <button className="w-full h-14 rounded overflow-hidden flex items-end justify-center bg-ink-900" onClick={() => setExpr(e)} title={label}>
                     <SpriteThumb c={c} expr={e} />
                   </button>

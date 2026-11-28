@@ -549,6 +549,7 @@ interface Store {
   addCharacter: () => void;
   updateCharacter: (id: string, patch: Partial<Character>) => void;
   deleteCharacter: (id: string) => void;
+  deleteCharacterExpression: (charId: string, expression: string) => void;
 
   uploadBackground: (file: File) => Promise<void>;
   uploadTrack: (file: File, mode?: 'music' | 'effect') => Promise<void>;
@@ -1294,6 +1295,28 @@ export const useStore = create<Store>((set, get) => {
       get().toast('Персонаж создан');
     },
     updateCharacter: (id, patch) => set(s => ({ project: { ...s.project, characters: s.project.characters.map(c => c.id === id ? (c.isNarrator ? { ...c, vars: patch.vars ?? c.vars } : { ...c, ...patch }) : c) } })),
+    deleteCharacterExpression: (charId, expression) => {
+      const character = get().project.characters.find(c => c.id === charId);
+      if (!character?.expressions?.includes(expression)) return;
+      const spriteId = character.sprites?.[expression];
+      get().commit();
+      set(s => ({
+        project: {
+          ...s.project,
+          characters: s.project.characters.map(c => {
+            if (c.id !== charId) return c;
+            const expressions = (c.expressions ?? []).filter(item => item !== expression);
+            const sprites = { ...(c.sprites ?? {}) };
+            const spriteMeta = { ...(c.spriteMeta ?? {}) };
+            delete sprites[expression];
+            delete spriteMeta[expression];
+            return { ...c, expressions, sprites, spriteMeta };
+          }),
+        },
+      }));
+      if (spriteId) scheduleAssetPurge(spriteId);
+      get().toast(`Эмоция «${expression}» удалена`, true);
+    },
     deleteCharacter: id => {
       if (id === 'global' || get().project.characters.find(x => x.id === id)?.isNarrator) { get().toast('Рассказчика удалить нельзя'); return; }
       const c = get().project.characters.find(x => x.id === id);
