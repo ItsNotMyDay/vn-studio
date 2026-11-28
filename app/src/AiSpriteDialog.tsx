@@ -307,7 +307,7 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
               </div>
             </div>
             <label className="block">
-              <span className="block text-[10.5px] uppercase tracking-wider text-mute mb-1">Промпт (внешность + характер + цвета + эмоция)</span>
+              <span className="block text-[10.5px] uppercase tracking-wider text-mute mb-1">Промпт (внешность + цвета + эмоция)</span>
               <CharacterPromptTextarea
                 className="textarea !min-h-[132px] font-mono !text-[11.5px]"
                 value={prompt}
