@@ -40,6 +40,25 @@ class CompatibilityTests(unittest.TestCase):
             self.assertEqual(model["adapter"], "transformers_causal_lm")
             self.assertTrue(model["architecture_supported"])
 
+    def test_exposes_bitsandbytes_settings_for_cpu_disk_offload(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self._make_llm(root, {
+                "model_type": "llama",
+                "architectures": ["LlamaForCausalLM"],
+                "quantization_config": {
+                    "quant_method": "bitsandbytes",
+                    "load_in_4bit": True,
+                    "bnb_4bit_quant_type": "nf4",
+                    "bnb_4bit_use_double_quant": True,
+                },
+            })
+            model = inspect_local_model(temp, "llm")
+            self.assertEqual(model["quant_method"], "bitsandbytes")
+            self.assertTrue(model["quantized"])
+            self.assertTrue(model["quantization_config"]["load_in_4bit"])
+            self.assertEqual(model["quantization_config"]["bnb_4bit_quant_type"], "nf4")
+
     def test_detects_multimodal_transformers_model(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
