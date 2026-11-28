@@ -3,6 +3,8 @@ import { FloatingWindow } from './FloatingWindow';
 import { Image as ImageIcon, X, RefreshCw, Dice5, Square, Check, Download, Loader2, Server, Wand2 } from 'lucide-react';
 import { useStore } from './store';
 import { downloadBlob } from './assets';
+import { CharacterPromptTextarea } from './CharacterPromptTextarea';
+import { expandCharacterReferences } from './textVariables';
 import {
   loadAiSettings, saveAiSettings, aiHealth, aiStartJob, aiPollJob, aiCancelJob, base64ToBlob,
   type AiSettings, type LocalQuantizationMode,
@@ -73,10 +75,20 @@ export function AiBackgroundDialog({ open, onClose }: { open: boolean; onClose: 
 
   const fullPrompt = () => {
     const base = prompt.trim() || 'atmospheric empty location';
+    const expandedPrompt = expandCharacterReferences(base, s.project.characters);
+    const hasCharacterReferences = expandedPrompt !== base;
+    const peopleInstruction = noPeople
+      ? hasCharacterReferences
+        ? 'include the explicitly referenced character or characters only, no additional people, no extra characters, no silhouettes'
+        : 'no people, no characters, no silhouettes, empty scene'
+      : '';
     const parts = [
       'visual novel background, anime scenery, highly detailed, clean lineart, soft cinematic lighting',
-      base,
-      noPeople ? 'no people, no characters, no silhouettes, empty scene' : '',
+      expandedPrompt,
+      peopleInstruction,
+      hasCharacterReferences
+        ? 'place each referenced character naturally inside the described environment, preserve their supplied visual appearance, match scene perspective, scale, lighting and color temperature'
+        : '',
       'no text, no watermark, no logo',
     ].filter(Boolean);
     return parts.join(', ');
@@ -246,12 +258,14 @@ export function AiBackgroundDialog({ open, onClose }: { open: boolean; onClose: 
 
             <div>
               <span className="block text-[10.5px] uppercase tracking-wider text-mute mb-1">Промпт локации</span>
-              <textarea
+              <CharacterPromptTextarea
                 className="textarea !min-h-[92px]"
-                placeholder="Например: пустая школьная крыша на закате, ветер гонит облака…"
+                placeholder="Например: школьная крыша на закате. Добавь @ИМЯ_ПЕРСОНАЖА, чтобы поместить героя в эту сцену…"
                 value={prompt}
-                onChange={e => setPrompt(e.target.value)}
+                onChange={setPrompt}
+                characters={s.project.characters}
               />
+              <div className="text-[10px] text-mute mt-1">Введи @, чтобы выбрать персонажа. Его внешность будет подставлена в промпт и вписана в фон.</div>
               <div className="flex flex-wrap gap-1 mt-1.5">
                 {STYLE_CHIPS.map(c => (
                   <button
@@ -269,7 +283,11 @@ export function AiBackgroundDialog({ open, onClose }: { open: boolean; onClose: 
 
             <button className="flex items-center gap-2" onClick={() => setNoPeople(v => !v)}>
               <span className={`toggle ${noPeople ? 'on' : ''}`} />
-              <span className="text-[11px] text-mute">Без персонажей в кадре</span>
+              <span className="text-[11px] text-mute">
+                {expandCharacterReferences(prompt, s.project.characters) !== prompt
+                  ? 'Не добавлять других персонажей'
+                  : 'Без персонажей в кадре'}
+              </span>
             </button>
 
             <div className="grid grid-cols-2 gap-3">
