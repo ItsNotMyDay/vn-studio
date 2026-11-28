@@ -750,12 +750,19 @@ export async function llmSuggest(
   const emotionKey = requestedEmotion.toLocaleLowerCase();
   const knownMood = SUGGESTION_EMOTIONS[emotionKey];
   const emotion = knownMood ? emotionKey : requestedEmotion;
-  const selectedMood = knownMood ?? {
-    label: requestedEmotion,
-    guidance: typeof currentNode.emotion_description === 'string' && currentNode.emotion_description.trim()
-      ? currentNode.emotion_description.trim()
-      : `Ориентируйся на название спрайта «${requestedEmotion}» и трактуй его как целевое настроение реплики. Не заменяй его другим настроением.`,
-  };
+  const spriteDescription = typeof currentNode.emotion_description === 'string'
+    ? currentNode.emotion_description.trim()
+    : '';
+  const selectedMood = knownMood
+    ? {
+        ...knownMood,
+        guidance: [knownMood.guidance, spriteDescription].filter(Boolean).join('\\n'),
+      }
+    : {
+        label: requestedEmotion,
+        guidance: spriteDescription
+          || `Ориентируйся на название спрайта «${requestedEmotion}» и трактуй его как целевое настроение реплики. Не заменяй его другим настроением.`,
+      };
   const suggestionContext = {
     ...context,
     current_node: { ...currentNode, emotion },
@@ -769,9 +776,9 @@ export async function llmSuggest(
     'Учитывай все уже написанные реплики диалога и то, кто именно их произнёс.',
     'Все варианты должны сохранять целевое настроение и соответствовать выбранному спрайту. Различай варианты только формулировкой и речевым приёмом внутри этого настроения.',
     'Не предлагай альтернативные эмоции. Поле tone может описывать только стиль внутри заданного настроения.',
-  ].join('\\n');
+  ].join('\n');
   if (remote) {
-    const system = 'Ты — опытный сценарист визуальных новелл. Пиши живые, естественные реплики на русском языке. Выбранное настроение — жёсткое ограничение: каждая предложенная реплика должна ему соответствовать; не меняй его ради разнообразия. Учитывай характер персонажа и контекст. Верни только валидный JSON без Markdown: {"suggestions":[{"text":"...","tone":"..."}]}.';
+    const system = 'Ты — опытный сценарист визуальных новелл. Пиши живые, естественные реплики на русском языке. Пиши только от лица персонажа, указанного в current_node.character_name, и не переключай говорящего. Используй все dialogue_replies из контекста как уже произнесённые реплики по порядку. Выбранное настроение и спрайт — жёсткое ограничение: каждая предложенная реплика должна им соответствовать; не меняй их ради разнообразия. Учитывай характер, локацию и ход диалога. Верни только валидный JSON без Markdown: {"suggestions":[{"text":"...","tone":"..."}]}.';
     const user = 'Количество вариантов: ' + count + '.\n' + moodInstruction + '\nКонтекст:\n' + JSON.stringify(suggestionContext, null, 2);
     const raw = await openAiChat(endpoint, remote, [{ role: 'system', content: system }, { role: 'user', content: user }], maxTokens, temp, signal);
     const match = raw.match(/\{[\s\S]*\}/);
