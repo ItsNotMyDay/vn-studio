@@ -239,9 +239,12 @@ export function buildSpritePrompt(
     ? 'full-length full-body anime visual novel character sprite, show the complete character from the very top of the head to the soles of both feet, standing pose, camera pulled back far enough to fit the entire figure, full legs and both feet clearly visible, both arms and hands visible, centered in a tall vertical composition, character occupies most of the canvas height with clear space above the head and below the feet, front-facing, complete silhouette, absolutely no cropping, not a close-up, not a bust shot, not a waist-up portrait'
     : 'anime visual novel character sprite, single character, upper body portrait from waist or chest up, centered, facing viewer, consistent character design';
   const emotionKey = expression.trim().toLowerCase();
-  const emotionPrompt = EMOTION_PROMPT[expression]
-    ?? EMOTION_PROMPT[emotionKey]
-    ?? `${expression.trim()} facial expression`;
+  const customEmotionDescription = c.expressionDescriptions?.[expression]?.trim();
+  const emotionPrompt = customEmotionDescription
+    ? `${expression.trim()}: ${customEmotionDescription}`
+    : EMOTION_PROMPT[expression]
+      ?? EMOTION_PROMPT[emotionKey]
+      ?? `${expression.trim()} facial expression`;
   const hairStyles: Record<Character['hairStyle'], string> = {
     short: 'short hairstyle',
     messy: 'messy tousled hairstyle',
@@ -741,19 +744,32 @@ export async function llmSuggest(
   remote?: OpenAiSettings,
 ): Promise<{ suggestions: LlmSuggestion[] }> {
   const currentNode = context?.current_node ?? {};
-  const requestedEmotion = typeof currentNode.emotion === 'string' ? currentNode.emotion : 'neutral';
-  const emotion = Object.prototype.hasOwnProperty.call(SUGGESTION_EMOTIONS, requestedEmotion) ? requestedEmotion : 'neutral';
-  const selectedMood = SUGGESTION_EMOTIONS[emotion];
+  const requestedEmotion = typeof currentNode.emotion === 'string' && currentNode.emotion.trim()
+    ? currentNode.emotion.trim()
+    : 'neutral';
+  const emotionKey = requestedEmotion.toLocaleLowerCase();
+  const knownMood = SUGGESTION_EMOTIONS[emotionKey];
+  const emotion = knownMood ? emotionKey : requestedEmotion;
+  const selectedMood = knownMood ?? {
+    label: requestedEmotion,
+    guidance: typeof currentNode.emotion_description === 'string' && currentNode.emotion_description.trim()
+      ? currentNode.emotion_description.trim()
+      : `Ориентируйся на название спрайта «${requestedEmotion}» и трактуй его как целевое настроение реплики. Не заменяй его другим настроением.`,
+  };
   const suggestionContext = {
     ...context,
     current_node: { ...currentNode, emotion },
   };
+  const location = context?.scene_atmosphere?.location || currentNode.location || 'не указана';
   const moodInstruction = [
-    `ОБЯЗАТЕЛЬНОЕ НАСТРОЕНИЕ КАЖДОЙ РЕПЛИКИ: ${selectedMood.label} (expression=${emotion}).`,
-    `Передавай его так: ${selectedMood.guidance}.`,
-    'Все варианты должны сохранять именно это настроение. Различай варианты формулировкой, ритмом и речевым приёмом только внутри выбранного настроения.',
-    'Не предлагай альтернативные эмоции и не делай один вариант весёлым, а другой грустным или злым. Поле tone может описывать только стиль внутри заданного настроения.',
-  ].join('\n');
+    `ЦЕЛЕВОЙ СПРАЙТ И НАСТРОЕНИЕ КАЖДОЙ РЕПЛИКИ: «${emotion}» — ${selectedMood.label}.`,
+    `Описание и способ передачи: ${selectedMood.guidance}.`,
+    `Говорящий: ${currentNode.character_name ?? 'последний выбранный персонаж'}. Пиши только от его лица.`,
+    `Локация диалога: ${location}.`,
+    'Учитывай все уже написанные реплики диалога и то, кто именно их произнёс.',
+    'Все варианты должны сохранять целевое настроение и соответствовать выбранному спрайту. Различай варианты только формулировкой и речевым приёмом внутри этого настроения.',
+    'Не предлагай альтернативные эмоции. Поле tone может описывать только стиль внутри заданного настроения.',
+  ].join('\\n');
   if (remote) {
     const system = 'Ты — опытный сценарист визуальных новелл. Пиши живые, естественные реплики на русском языке. Выбранное настроение — жёсткое ограничение: каждая предложенная реплика должна ему соответствовать; не меняй его ради разнообразия. Учитывай характер персонажа и контекст. Верни только валидный JSON без Markdown: {"suggestions":[{"text":"...","tone":"..."}]}.';
     const user = 'Количество вариантов: ' + count + '.\n' + moodInstruction + '\nКонтекст:\n' + JSON.stringify(suggestionContext, null, 2);
@@ -784,6 +800,7 @@ export interface ContextChunk {
   meta: {
     speaker?: string;
     emotion?: string;
+    emotion_description?: string;
     node_type?: string;
     background?: string;
     music?: string;
@@ -798,8 +815,18 @@ export interface RichContext {
     character_personality: string;
     character_appearance: string;
     emotion: string;
+    sprite_name?: string;
+    emotion_description?: string;
+    location?: string;
     character_vars: Record<string, number | string | boolean>;
   };
+  dialogue_replies?: {
+    speaker: string;
+    text: string;
+    sprite_name: string;
+    emotion: string;
+    emotion_description: string;
+  }[];
   event_history: ContextChunk[];
   other_characters_present: {
     name: string;
@@ -807,7 +834,7 @@ export interface RichContext {
     appearance: string;
     recent_lines: string[];
   }[];
-  scene_atmosphere: { backgrounds: string[]; tracks: string[] };
+  scene_atmosphere: { backgrounds: string[]; tracks: string[]; location?: string };
   rag_context?: string[];
 }
 
