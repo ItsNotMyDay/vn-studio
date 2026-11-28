@@ -1106,9 +1106,21 @@ def load_llm(path: str, quantization_mode: str = "none"):
             kwargs["quantization_config"] = _llm_bnb_offload_config(
                 model_info, compute_dtype, torch
             )
-            device_map = _llm_build_custom_bnb_device_map(
-                path, model_cls, compatibility, dtype
+            profile_strategy = str(profile.get("strategy") or "")
+            predicted_full_gpu_fit = (
+                not bool(profile.get("offload"))
+                and profile_strategy in ("gpu_4bit", "single_gpu")
             )
+            if predicted_full_gpu_fit:
+                # The compatibility analyzer already estimated the 4-bit
+                # checkpoint footprint with headroom. Keep the whole model on
+                # GPU instead of sizing 4-bit weights as FP16 and offloading
+                # far more layers than necessary.
+                device_map = {"": 0}
+            else:
+                device_map = _llm_build_custom_bnb_device_map(
+                    path, model_cls, compatibility, dtype
+                )
             kwargs["device_map"] = device_map
             if any(str(value).lower() == "disk" for value in device_map.values()):
                 offload_folder = os.path.join(QUANTIZED_MODELS_DIR, "llm-offload")
