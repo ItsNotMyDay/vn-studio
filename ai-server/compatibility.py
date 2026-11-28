@@ -293,6 +293,7 @@ def inspect_local_model(model_path: str, requested_kind: str) -> dict[str, Any]:
     model_index = _read_json(path / "model_index.json")
     config = _read_json(path / "config.json")
     size = _measure_model(path)
+    quantization_config_details: dict[str, Any] = {}
     if model_index:
         actual_kind = "image"
         architectures = [str(model_index.get("_class_name", "DiffusionPipeline"))]
@@ -353,6 +354,22 @@ def inspect_local_model(model_path: str, requested_kind: str) -> dict[str, Any]:
         quant_config = config.get("quantization_config") or config.get("compression_config")
         quantized = bool(quant_config)
         quant_method = str((quant_config or {}).get("quant_method") or (quant_config or {}).get("quant_method_name") or "").lower()
+        if quant_method == "bitsandbytes" and isinstance(quant_config, dict):
+            # Keep only the BitsAndBytes settings needed to reconstruct an
+            # offload-capable config. The raw config is metadata, not executable code.
+            supported_bnb_keys = (
+                "load_in_4bit", "_load_in_4bit",
+                "load_in_8bit", "_load_in_8bit",
+                "bnb_4bit_quant_type", "bnb_4bit_use_double_quant",
+                "bnb_4bit_compute_dtype", "bnb_4bit_quant_storage",
+                "llm_int8_threshold", "llm_int8_skip_modules",
+                "llm_int8_has_fp16_weight",
+            )
+            quantization_config_details = {
+                key: quant_config[key]
+                for key in supported_bnb_keys
+                if key in quant_config
+            }
         processor_present = any((path / n).exists() for n in (
             "processor_config.json", "preprocessor_config.json", "processor",
         ))
@@ -406,6 +423,7 @@ def inspect_local_model(model_path: str, requested_kind: str) -> dict[str, Any]:
         "multimodal": multimodal,
         "quantized": quantized,
         "quant_method": quant_method if "quant_method" in locals() else None,
+        "quantization_config": quantization_config_details,
         "processor_present": processor_present,
         "tokenizer_present": tokenizer_present,
         "custom_code_present": custom_code_present,

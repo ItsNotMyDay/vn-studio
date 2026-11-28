@@ -891,6 +891,129 @@ def _llm_max_memory(compatibility: dict) -> Optional[dict]:
     return max_memory or None
 
 
+def _llm_build_custom_bnb_device_map(path: str, model_cls, compatibility: dict, dtype):
+    """
+    Build an explicit Accelerate device map for BitsAndBytes.
+
+    Transformers' automatic map can place 4-bit layers on CPU/disk and reject
+    the load. An explicit map plus llm_int8_enable_fp32_cpu_offload keeps those
+    layers in the requested torch dtype instead of converting them to 4-bit.
+    """
+    try:
+        from accelerate import init_empty_weights
+        from accelerate.utils import infer_auto_device_map
+        from transformers import AutoConfig
+    except Exception as exc:
+        raise RuntimeError(
+            "Для размещения квантованной LLM между видеопамятью и RAM нужны "
+            "совместимые пакеты accelerate и Transformers."
+        ) from exc
+
+    max_memory = _llm_max_memory(compatibility)
+    gpu_memory = {
+        key: value for key, value in (max_memory or {}).items()
+        if isinstance(key, int) or str(key).isdigit()
+    }
+    if not gpu_memory:
+        raise RuntimeError(
+            "Не удалось определить доступную видеопамять для карты размещения BitsAndBytes. "
+            "Закройте приложения, использующие GPU, и повторите загрузку."
+        )
+
+    try:
+        config = AutoConfig.from_pretrained(path, local_files_only=True)
+        with init_empty_weights():
+            empty_model = model_cls.from_config(config)
+        try:
+            empty_model.tie_weights()
+        except Exception:
+            pass
+
+        no_split = getattr(empty_model, "_no_split_modules", None) or []
+        infer_kwargs = {
+            "max_memory": max_memory,
+            "no_split_module_classes": no_split,
+        }
+        try:
+            infer_parameters = inspect.signature(infer_auto_device_map).parameters
+        except (TypeError, ValueError):
+            infer_parameters = {}
+        if "dtype" in infer_parameters:
+            infer_kwargs["dtype"] = dtype
+
+        device_map = infer_auto_device_map(empty_model, **infer_kwargs)
+        if not isinstance(device_map, dict) or not device_map:
+            raise RuntimeError("Accelerate вернул пустую карту размещения.")
+
+        targets = {str(value).lower() for value in device_map.values()}
+        if not any(target not in ("cpu", "disk", "meta") for target in targets):
+            raise RuntimeError(
+                "Расчёт карты размещения отправил всю модель на CPU/диск. "
+                "Для BitsAndBytes требуется свободная видеопамять хотя бы для части модели."
+            )
+
+        gpu_modules = sum(
+            1 for value in device_map.values()
+            if str(value).lower() not in ("cpu", "disk", "meta")
+        )
+        cpu_modules = sum(1 for value in device_map.values() if str(value).lower() == "cpu")
+        disk_modules = sum(1 for value in device_map.values() if str(value).lower() == "disk")
+        print(
+            f"[llm-device-map] BitsAndBytes map: GPU={gpu_modules}, "
+            f"CPU={cpu_modules}, disk={disk_modules}",
+            flush=True,
+        )
+        return device_map
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        raise RuntimeError(
+            "Не удалось построить карту размещения квантованной LLM: "
+            f"{type(exc).__name__}: {str(exc)[:320]}"
+        ) from exc
+
+
+def _llm_bnb_offload_config(model_info: dict, compute_dtype, torch):
+    """Rebuild a BnB config while enabling FP/torch-dtype CPU and disk modules."""
+    from transformers import BitsAndBytesConfig
+
+    source = model_info.get("quantization_config") or {}
+    load_in_8bit = bool(source.get("load_in_8bit", source.get("_load_in_8bit", False)))
+    load_in_4bit = bool(source.get("load_in_4bit", source.get("_load_in_4bit", False)))
+    if not load_in_4bit and not load_in_8bit:
+        # A BitsAndBytes checkpoint without explicit flags is most commonly 4-bit.
+        load_in_4bit = True
+    if load_in_4bit and load_in_8bit:
+        raise RuntimeError("Некорректная конфигурация BitsAndBytes: одновременно включены INT4 и INT8.")
+
+    config_kwargs = {
+        "load_in_4bit": load_in_4bit,
+        "load_in_8bit": load_in_8bit,
+        "llm_int8_threshold": float(source.get("llm_int8_threshold", 6.0)),
+        "llm_int8_skip_modules": source.get("llm_int8_skip_modules"),
+        "llm_int8_has_fp16_weight": bool(source.get("llm_int8_has_fp16_weight", False)),
+        # For 4-bit checkpoints this keeps CPU/disk modules in the requested
+        # torch dtype; for 8-bit checkpoints it enables the documented FP32 path.
+        "llm_int8_enable_fp32_cpu_offload": True,
+    }
+    if load_in_4bit:
+        dtype_name = str(source.get("bnb_4bit_compute_dtype") or "").split(".")[-1]
+        stored_dtype = getattr(torch, dtype_name, None) if dtype_name else None
+        config_kwargs["bnb_4bit_compute_dtype"] = (
+            stored_dtype if isinstance(stored_dtype, torch.dtype) else compute_dtype
+        )
+        config_kwargs["bnb_4bit_quant_type"] = str(source.get("bnb_4bit_quant_type") or "nf4")
+        config_kwargs["bnb_4bit_use_double_quant"] = bool(
+            source.get("bnb_4bit_use_double_quant", True)
+        )
+        storage_name = str(source.get("bnb_4bit_quant_storage") or "").split(".")[-1]
+        storage_dtype = getattr(torch, storage_name, None) if storage_name else None
+        if isinstance(storage_dtype, torch.dtype):
+            config_kwargs["bnb_4bit_quant_storage"] = storage_dtype
+
+    return BitsAndBytesConfig(**config_kwargs)
+
+
 def load_llm(path: str, quantization_mode: str = "none"):
     _ensure_transformers_ready()
     import torch
@@ -962,19 +1085,67 @@ def load_llm(path: str, quantization_mode: str = "none"):
     accelerate_available = bool(
         compatibility.get("hardware", {}).get("software", {}).get("accelerate", {}).get("available")
     )
+    # Both freshly quantized INT4 models and pre-quantized BitsAndBytes
+    # checkpoints need an explicit device map. device_map="auto" can silently
+    # put 4-bit modules on CPU/disk, which Transformers rejects by default.
+    bnb_offload_required = (
+        (quantization_mode == "int4" and not use_prequantized)
+        or (use_prequantized and quant_method == "bitsandbytes")
+    )
     kwargs = {
         "low_cpu_mem_usage": accelerate_available,
         "dtype": dtype,
     }
 
-    if device == "cuda":
+    if bnb_offload_required:
+        if device != "cuda":
+            raise RuntimeError("Для локальных BitsAndBytes INT4/INT8 моделей требуется NVIDIA CUDA.")
+        if not accelerate_available:
+            raise RuntimeError("Для размещения BitsAndBytes-модели требуется пакет accelerate.")
+        try:
+            kwargs["quantization_config"] = _llm_bnb_offload_config(
+                model_info, compute_dtype, torch
+            )
+            profile_strategy = str(profile.get("strategy") or "")
+            predicted_full_gpu_fit = (
+                not bool(profile.get("offload"))
+                and profile_strategy in ("gpu_4bit", "single_gpu")
+            )
+            if predicted_full_gpu_fit:
+                # The compatibility analyzer already estimated the 4-bit
+                # checkpoint footprint with headroom. Keep the whole model on
+                # GPU instead of sizing 4-bit weights as FP16 and offloading
+                # far more layers than necessary.
+                device_map = {"": 0}
+            else:
+                device_map = _llm_build_custom_bnb_device_map(
+                    path, model_cls, compatibility, dtype
+                )
+            kwargs["device_map"] = device_map
+            if any(str(value).lower() == "disk" for value in device_map.values()):
+                offload_folder = os.path.join(QUANTIZED_MODELS_DIR, "llm-offload")
+                shutil.rmtree(offload_folder, ignore_errors=True)
+                os.makedirs(offload_folder, exist_ok=True)
+                kwargs["offload_folder"] = offload_folder
+                kwargs["offload_state_dict"] = True
+                kwargs["offload_buffers"] = True
+            elif any(str(value).lower() == "cpu" for value in device_map.values()):
+                kwargs["offload_buffers"] = True
+        except Exception as exc:
+            if isinstance(exc, RuntimeError):
+                raise
+            raise RuntimeError(
+                "Не удалось подготовить безопасную загрузку BitsAndBytes: "
+                f"{type(exc).__name__}: {str(exc)[:260]}"
+            ) from exc
+    elif device == "cuda":
         if not accelerate_available:
             if quantization_mode == "int4":
                 raise RuntimeError("Для INT4 требуется установленный accelerate.")
         else:
             kwargs["device_map"] = "auto"
             max_memory = _llm_max_memory(compatibility)
-            if max_memory and profile_is_reliable and quantization_mode != "int4":
+            if max_memory and profile_is_reliable:
                 kwargs["max_memory"] = max_memory
     elif device in ("mps", "xpu"):
         # Load in host RAM and transfer explicitly on non-CUDA accelerators.
@@ -988,26 +1159,24 @@ def load_llm(path: str, quantization_mode: str = "none"):
     if quantization_mode in ("int4", "fp16") and not use_prequantized:
         cache_dir, cache_metadata, cache_hit = _quantization_cache_info(path, "llm", quantization_mode)
 
-    if quantization_mode == "int4" and not use_prequantized and not cache_hit:
-        try:
-            from transformers import BitsAndBytesConfig
-            kwargs["quantization_config"] = BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_quant_type="nf4",
-                bnb_4bit_compute_dtype=compute_dtype,
-                bnb_4bit_use_double_quant=True,
-            )
-        except Exception as exc:
-            raise RuntimeError(
-                "Не удалось включить INT4: установите совместимую версию bitsandbytes. "
-                + f"{type(exc).__name__}: {str(exc)[:240]}"
-            ) from exc
-
     profile.update(
         device=device,
         dtype="float16" if quantization_mode in ("int4", "fp16") else "auto",
         quantization=applied_quantization,
     )
+    if bnb_offload_required:
+        offload_targets = {
+            str(value).lower() for value in kwargs["device_map"].values()
+        }
+        has_cpu_offload = "cpu" in offload_targets or "disk" in offload_targets
+        profile.update(
+            offload=has_cpu_offload,
+            strategy=(
+                "gpu_cpu_disk_offload" if "disk" in offload_targets
+                else "gpu_cpu_offload" if "cpu" in offload_targets
+                else "cuda_bitsandbytes"
+            ),
+        )
 
     def _load_model_from(source_path, load_kwargs):
         try:
@@ -1032,12 +1201,8 @@ def load_llm(path: str, quantization_mode: str = "none"):
             shutil.rmtree(cache_dir, ignore_errors=True)
             cache_hit = False
             if quantization_mode == "int4" and not use_prequantized:
-                from transformers import BitsAndBytesConfig
-                kwargs["quantization_config"] = BitsAndBytesConfig(
-                    load_in_4bit=True,
-                    bnb_4bit_quant_type="nf4",
-                    bnb_4bit_compute_dtype=compute_dtype,
-                    bnb_4bit_use_double_quant=True,
+                kwargs["quantization_config"] = _llm_bnb_offload_config(
+                    model_info, compute_dtype, torch
                 )
             model = _load_model_from(path, kwargs)
 
@@ -1045,11 +1210,24 @@ def load_llm(path: str, quantization_mode: str = "none"):
             model = model.to(device)
         model.eval()
         if cache_dir is not None and not cache_hit:
-            try:
-                print(f"[quant-cache] Saving {quantization_mode} LLM to {cache_dir}", flush=True)
-                _save_quantized_cache(model, cache_dir, cache_metadata, "llm")
-            except Exception as cache_error:
-                print(f"[quant-cache] Could not persist LLM cache: {cache_error}", flush=True)
+            configured_device_map = kwargs.get("device_map")
+            map_targets = (
+                {str(value).lower() for value in configured_device_map.values()}
+                if isinstance(configured_device_map, dict)
+                else set()
+            )
+            if map_targets.intersection({"cpu", "disk"}):
+                print(
+                    "[quant-cache] Skipping serialization of an offloaded LLM; "
+                    "its CPU/disk modules are not a portable standalone cache.",
+                    flush=True,
+                )
+            else:
+                try:
+                    print(f"[quant-cache] Saving {quantization_mode} LLM to {cache_dir}", flush=True)
+                    _save_quantized_cache(model, cache_dir, cache_metadata, "llm")
+                except Exception as cache_error:
+                    print(f"[quant-cache] Could not persist LLM cache: {cache_error}", flush=True)
         with LLM_LOCK:
             LLM_STATE.update(
                 model=model, tokenizer=tokenizer, processor=processor, loaded=True,
