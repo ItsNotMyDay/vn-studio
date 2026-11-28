@@ -1350,35 +1350,60 @@ def _suggest_impl(req: LlmSuggestReq, cancel_check=None):
     ctx = req.context
     n = max(1, min(6, req.count))
 
-    # История событий
+    # История предыдущих событий с именами говорящих и настроением их спрайтов.
     history = ctx.get("event_history", [])
-    history_txt = "\n".join(f"  {h['meta'].get('speaker', '[событие]')}: {h['text']}" for h in history) or "  (нет)"
 
-    # Другие персонажи
+    def format_history_line(item):
+        meta = item.get("meta") or {}
+        speaker = meta.get("speaker", "[событие]")
+        sprite = meta.get("emotion")
+        description = str(meta.get("emotion_description") or "").strip()
+        mood = f" [спрайт/настроение: {sprite}{' — ' + description if description else ''}]" if sprite else ""
+        return f"  {speaker}{mood}: {item.get('text', '')}"
+
+    history_txt = "\n".join(format_history_line(item) for item in history) or "  (нет)"
+
+    # Другие персонажи.
     others = ctx.get("other_characters_present", [])
     others_txt = ""
     if others:
         others_txt = "\n".join(
-            f"  - {o['name']} ({o['personality'][:60]}...): последние реплики: {'; '.join(o['recent_lines'][-2:])}"
+            f"  - {o['name']} ({o.get('personality', '')[:60]}...): последние реплики: {'; '.join(o.get('recent_lines', [])[-2:])}"
             for o in others
         )
 
-    # Атмосфера
+    # Локация и атмосфера текущей сцены.
     atm = ctx.get("scene_atmosphere", {})
     atm_txt = ""
-    if atm.get("backgrounds"):
-        atm_txt += f"Фоны: {', '.join(atm['backgrounds'])}. "
+    location = str(atm.get("location") or "").strip()
+    if not location and atm.get("backgrounds"):
+        location = str(atm["backgrounds"][-1])
+    if location:
+        atm_txt += f"Локация диалога (текущий фон): {location}. "
+    elif atm.get("backgrounds"):
+        atm_txt += f"Фоны в истории: {', '.join(atm['backgrounds'])}. "
     if atm.get("tracks"):
         atm_txt += f"Музыка: {', '.join(atm['tracks'])}."
 
-    # RAG-контекст из предыдущих глав
+    # Контекст всех реплик именно той диалоговой ноды, из которой запрошены варианты.
+    dialogue_replies = ctx.get("dialogue_replies", [])
+    dialogue_replies_txt = "\n".join(
+        f"  {reply.get('speaker', '???')} "
+        f"[спрайт/настроение: {reply.get('sprite_name') or reply.get('emotion') or 'не задано'}"
+        f"{' — ' + str(reply.get('emotion_description')).strip() if reply.get('emotion_description') else ''}]: "
+        f"{reply.get('text', '')}"
+        for reply in dialogue_replies
+    ) or "  (в этой ноде реплик пока нет)"
+
+    # RAG-контекст из предыдущих глав.
     rag = ctx.get("rag_context", [])
     rag_txt = ""
     if rag:
         rag_txt = "\nСвязанные моменты из предыдущих глав:\n" + "\n".join(f"  - {r}" for r in rag)
 
     current_node = ctx.get("current_node") or {}
-    requested_emotion = str(current_node.get("emotion") or "neutral").strip().lower()
+    requested_emotion = str(current_node.get("emotion") or current_node.get("sprite_name") or "neutral").strip()
+    requested_emotion_key = requested_emotion.lower()
     emotion_profiles = {
         "neutral": ("спокойствие", "говори ровно и сдержанно, без сильной радости, раздражения, печали или удивления"),
         "smile": ("улыбка", "передай дружелюбие, теплоту и лёгкую радость; допустимы мягкий юмор и доброжелательная игривость, но не злость и не уныние"),
@@ -1386,25 +1411,40 @@ def _suggest_impl(req: LlmSuggestReq, cancel_check=None):
         "sad": ("грусть", "передай печаль, подавленность или уязвимость через тихую, сдержанную интонацию; не превращай реплику в весёлую, дерзкую или воодушевлённую"),
         "surprised": ("удивление", "передай неожиданность, изумление или растерянность через реакцию, вопросы, паузы или уточнения; не подменяй удивление злостью или радостью"),
     }
-    emotion = requested_emotion if requested_emotion in emotion_profiles else "neutral"
-    emotion_label, emotion_guidance = emotion_profiles[emotion]
+    if requested_emotion_key in emotion_profiles:
+        emotion = requested_emotion_key
+        emotion_label, emotion_guidance = emotion_profiles[emotion]
+    else:
+        # Пользовательские имена спрайтов не должны сбрасываться в neutral.
+        emotion = requested_emotion or "neutral"
+        emotion_label = emotion
+        emotion_guidance = str(current_node.get("emotion_description") or "").strip()
+        if not emotion_guidance:
+            emotion_guidance = (
+                f"Интерпретируй название спрайта «{emotion}» как целевое настроение. "
+                "Сохраняй его во всех вариантах и не подменяй другой эмоцией."
+            )
 
     system = ("Ты - опытный сценарист визуальных новелл с глубоким пониманием психологии персонажей. "
               "Пиши живые, характерные реплики на русском языке, которые звучат естественно. "
               "Учитывай характер говорящего, его отношения с другими персонажами, атмосферу сцены и предыдущие события. "
-              "Выбранное настроение реплики - обязательное ограничение для КАЖДОГО варианта: не меняй эмоцию ради разнообразия. "
+              "Пиши строго от лица персонажа, выбранного в последней реплике текущей диалоговой ноды; не переключай говорящего. "
+              "Выбранный спрайт и его настроение - обязательное ограничение для КАЖДОГО варианта: не меняй его ради разнообразия. "
+              "Все уже существующие реплики этой ноды обязательны к учёту; продолжай диалог, не повторяй готовые фразы. "
               "Разнообразие допускается только в формулировке и речевом приёме внутри заданного настроения. "
               "Отвечай ТОЛЬКО валидным JSON без пояснений.")
 
     user = (
         f"Сцена: {ctx.get('chapter_title', '?')}\n"
-        f"История событий до этого момента:\n{history_txt}\n"
-        f"Говорит: {current_node.get('character_name', '?')}\n"
+        f"История событий до этого момента (говорящий, реплика и спрайт/настроение):\n{history_txt}\n"
+        f"Локация диалога: {location or current_node.get('location') or 'не указана'}\n"
+        f"Говорит (последний выбранный персонаж): {current_node.get('character_name', '?')}\n"
         f"Характер: {current_node.get('character_personality', 'не указан')}\n"
         f"Внешность: {current_node.get('character_appearance', 'не указана')}\n"
-        f"ЦЕЛЕВОЕ НАСТРОЕНИЕ КАЖДОЙ РЕПЛИКИ: {emotion_label} (expression={emotion}).\n"
+        f"ЦЕЛЕВОЙ СПРАЙТ И НАСТРОЕНИЕ КАЖДОЙ РЕПЛИКИ: {emotion_label} (имя спрайта={emotion}).\n"
         f"Как его передать: {emotion_guidance}.\n"
         f"Отношения (переменные): {current_node.get('character_vars', {})}\n"
+        f"Все реплики текущей диалоговой ноды по порядку (кто, что сказал и с каким спрайтом/настроением):\n{dialogue_replies_txt}\n"
     )
     if others_txt:
         user += f"Другие персонажи в сцене:\n{others_txt}\n"
@@ -1414,9 +1454,10 @@ def _suggest_impl(req: LlmSuggestReq, cancel_check=None):
         user += rag_txt + "\n"
     user += (
         f"Предложи ровно {n} варианта следующей реплики ЭТОГО персонажа. "
-        "ВСЕ варианты обязаны сохранять заданное настроение. Различай их только формулировкой, ритмом и речевым приёмом внутри этой эмоции. "
-        "Не предлагай альтернативные эмоции: например, не делай один вариант весёлым, а другой грустным или злым. "
-        "Поле tone может описывать только стиль внутри заданного настроения. Учитывай характер и контекст.\n"
+        "Все варианты должны быть от лица персонажа из последней реплики текущей диалоговой ноды. "
+        "Не меняй говорящего и не повторяй уже написанные реплики. "
+        "Все варианты обязаны сохранять выбранный спрайт и его настроение; различай их только формулировкой, ритмом и речевым приёмом внутри этой эмоции. "
+        "Не предлагай альтернативные эмоции. Поле tone может описывать только стиль внутри заданного настроения.\n"
         '{"suggestions": [{"text": "...", "tone": "..."}]}'
     )
 
