@@ -236,22 +236,27 @@ export function buildSpritePrompt(
   framing: CharacterSpriteFraming = 'portrait',
 ): string {
   const composition = framing === 'full'
-    ? 'anime visual novel full-body character sprite, entire body visible from head to toe, standing pose, feet fully visible, centered, facing viewer, complete silhouette, no cropping, consistent character design'
-    : 'anime visual novel character sprite, single character, upper body portrait, centered, facing viewer, consistent character design';
+    ? 'full-length full-body anime visual novel character sprite, show the complete character from the very top of the head to the soles of both feet, standing pose, camera pulled back far enough to fit the entire figure, full legs and both feet clearly visible, both arms and hands visible, centered in a tall vertical composition, character occupies most of the canvas height with clear space above the head and below the feet, front-facing, complete silhouette, absolutely no cropping, not a close-up, not a bust shot, not a waist-up portrait'
+    : 'anime visual novel character sprite, single character, upper body portrait from waist or chest up, centered, facing viewer, consistent character design';
   const emotionKey = expression.trim().toLowerCase();
   const emotionPrompt = EMOTION_PROMPT[expression]
     ?? EMOTION_PROMPT[emotionKey]
     ?? `${expression.trim()} facial expression`;
+  const hairStyles: Record<Character['hairStyle'], string> = {
+    short: 'short hairstyle',
+    messy: 'messy tousled hairstyle',
+    long: 'long hairstyle',
+  };
   const parts = [
     composition,
     c.name ? `character name: ${c.name}` : '',
-    c.appearance?.trim() ? `appearance: ${c.appearance.trim()}` : '',
-    c.personality?.trim() ? `personality and mood: ${c.personality.trim()}` : '',
+    c.appearance?.trim() ? `visual appearance: ${c.appearance.trim()}` : '',
+    hairStyles[c.hairStyle],
     `hair: ${colorName(c.hair, 'hair')} hair, exact hair color ${c.hair}`,
     `outfit: ${colorName(c.jacket, 'cloth')} clothing, exact clothing color ${c.jacket}`,
     `skin: ${skinTone(c.skin)}, exact skin tone ${c.skin}`,
     `facial expression: ${emotionPrompt}`,
-    'clean lineart, soft cel shading, crisp eyes, high detail, studio quality',
+    'single character only, clean lineart, soft cel shading, crisp eyes, high detail, studio quality',
     s.transparent ? 'isolated on transparent background, no scenery, no props' : '',
   ].filter(Boolean);
   return parts.join(', ');

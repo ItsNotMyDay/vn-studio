@@ -54,3 +54,59 @@ export function getVariableAutocomplete(
   const items = character.vars.filter(variable => variable.key.toLocaleUpperCase().includes(query));
   return { kind: 'variable', start: start + dot + 2, end: cursor, query, character, items };
 }
+
+export interface CharacterReferenceAutocomplete {
+  start: number;
+  end: number;
+  query: string;
+  items: Character[];
+}
+
+export function getCharacterReferenceAutocomplete(
+  value: string,
+  cursor: number,
+  characters: Character[],
+): CharacterReferenceAutocomplete | null {
+  const prefix = value.slice(0, cursor);
+  const match = /@([^@\s.]*)$/u.exec(prefix);
+  if (!match) return null;
+  const query = match[1].toLocaleUpperCase();
+  const start = cursor - match[0].length;
+  const items = characters.filter(character =>
+    !character.isNarrator && characterVariableAlias(character).includes(query),
+  );
+  return { start, end: cursor, query, items };
+}
+
+/** Build only visual traits; character personality is intentionally excluded from image prompts. */
+export function describeCharacterAppearance(character: Character): string {
+  const hairStyles: Record<Character['hairStyle'], string> = {
+    short: 'short hairstyle',
+    messy: 'messy tousled hairstyle',
+    long: 'long hairstyle',
+  };
+  const details = [
+    character.appearance?.trim(),
+    hairStyles[character.hairStyle],
+    `hair color ${character.hair}`,
+    `clothing color ${character.jacket}`,
+    `skin tone ${character.skin}`,
+  ].filter(Boolean);
+  return `visual appearance of ${character.name}: ${details.join(', ')}`;
+}
+
+/** Replace @CHARACTER aliases in image prompts with that character's visual description. */
+export function expandCharacterReferences(prompt: string, characters: Character[]): string {
+  const byAlias = new Map<string, Character>();
+  characters.filter(character => !character.isNarrator).forEach(character => {
+    byAlias.set(characterVariableAlias(character).toLocaleUpperCase(), character);
+  });
+  return String(prompt ?? '').replace(
+    /@([\p{L}\p{N}_-]+)/gu,
+    (token, alias: string) => {
+      const character = byAlias.get(alias.toLocaleUpperCase());
+      if (!character) return token;
+      return `[CHARACTER VISUAL REFERENCE: ${describeCharacterAppearance(character)}. Reproduce these visual traits consistently.]`;
+    },
+  );
+}

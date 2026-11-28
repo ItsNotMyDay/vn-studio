@@ -3,6 +3,8 @@ import { FloatingWindow } from './FloatingWindow';
 import { AlertTriangle, Check, Dice5, Download, ImagePlus, Loader2, Server, Sparkles, X } from 'lucide-react';
 import { useStore } from './store';
 import { downloadBlob } from './assets';
+import { CharacterPromptTextarea } from './CharacterPromptTextarea';
+import { expandCharacterReferences } from './textVariables';
 import {
   loadAiSettings, saveAiSettings, aiHealth, aiStartJob, aiPollJob, aiCancelJob, base64ToBlob,
   type AiSettings, type JobState, type LocalQuantizationMode,
@@ -149,7 +151,10 @@ export function AiSpriteAssetDialog({ open, onClose }: { open: boolean; onClose:
         model_id: cfg.modelId,
         model_path: cfg.modelPath,
         quantization: quantization ?? 'none',
-        prompt: prompt.trim() || 'isolated visual novel sprite, centered, transparent background',
+        prompt: expandCharacterReferences(
+          prompt.trim() || 'isolated visual novel sprite, centered, transparent background',
+          s.project.characters,
+        ),
         negative_prompt: cfg.negative,
         width,
         height,
@@ -347,12 +352,14 @@ export function AiSpriteAssetDialog({ open, onClose }: { open: boolean; onClose:
 
               <label className="block">
                 <span className="block text-[10.5px] uppercase tracking-wider text-mute mb-1">Промпт</span>
-                <textarea
+                <CharacterPromptTextarea
                   className="textarea !min-h-[112px] font-mono !text-[11.5px]"
                   value={prompt}
-                  onChange={e => setPrompt(e.target.value)}
-                  placeholder="Опиши объект, персонажа или элемент интерфейса…"
+                  onChange={setPrompt}
+                  characters={s.project.characters}
+                  placeholder="Опиши объект или персонажа… Используй @ИМЯ_ПЕРСОНАЖА, чтобы добавить героя."
                 />
+                <div className="text-[10px] text-mute mt-1">Введи @, чтобы выбрать персонажа и передать модели его внешность.</div>
               </label>
 
               <label className="block">
