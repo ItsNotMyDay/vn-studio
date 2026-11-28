@@ -64,6 +64,8 @@ export interface Character {
   hairStyle: 'short' | 'messy' | 'long'; appearance: string; personality: string; vars: Variable[];
   sprites?: Partial<Record<string, string>>;
   spriteMeta?: Partial<Record<string, { source: string; prompt?: string; seed?: number; model?: string }>>;
+  /** Additional emotion names created by the user for this character. */
+  expressions?: string[];
   isNarrator?: boolean;
 }
 export interface Background { id: string; name: string; kind: 'park' | 'cafe' | 'city' | 'room'; assetId?: string; }
