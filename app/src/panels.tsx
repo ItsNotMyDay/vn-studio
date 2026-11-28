@@ -861,7 +861,7 @@ function CharacterEditor({ c }: { c: Character }) {
             const meta = c.spriteMeta?.[e];
             const label = EXPR_RU[e] || e;
             return (
-              <div key={e} className={`w-[56px] shrink-0 rounded-lg border p-1 space-y-1 ${expr === e ? 'border-ink-500 bg-ink-700' : 'border-ink-700 bg-ink-850'}`}>
+              <div key={e} className={`w-[calc((100%-24px)/5)] shrink-0 rounded-lg border p-1 space-y-1 ${expr === e ? 'border-ink-500 bg-ink-700' : 'border-ink-700 bg-ink-850'}`}>
                 <div className="relative">
                   {(c.expressions ?? []).includes(e) && (
                     <button
