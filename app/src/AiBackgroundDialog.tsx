@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { FloatingWindow } from './FloatingWindow';
-import { Image as ImageIcon, X, RefreshCw, Dice5, Square, Check, Loader2, Server, Wand2 } from 'lucide-react';
+import { Image as ImageIcon, X, RefreshCw, Dice5, Square, Check, Download, Loader2, Server, Wand2 } from 'lucide-react';
 import { useStore } from './store';
+import { downloadBlob } from './assets';
 import {
   loadAiSettings, saveAiSettings, aiHealth, aiStartJob, aiPollJob, aiCancelJob, base64ToBlob,
   type AiSettings, type LocalQuantizationMode,
@@ -202,9 +203,20 @@ export function AiBackgroundDialog({ open, onClose }: { open: boolean; onClose: 
                 </div>
               )}
               {result && !busy && (
-                <span className="absolute top-2 left-2 chip !text-[10px]" style={{ borderColor: '#9dff5766', color: '#9dff57' }}>
-                  {res.id} · seed {result.seed}
-                </span>
+                <>
+                  <span className="absolute top-2 left-2 chip !text-[10px]" style={{ borderColor: '#9dff5766', color: '#9dff57' }}>
+                    {res.id} · seed {result.seed}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn !w-9 !h-9 !p-0 justify-center absolute bottom-2 right-2 z-20 bg-ink-950/90"
+                    title="Скачать изображение"
+                    aria-label="Скачать изображение"
+                    onClick={() => downloadBlob(result.blob, name.trim() || 'VN-Studio-background')}
+                  >
+                    <Download size={16} />
+                  </button>
+                </>
               )}
             </div>
 
