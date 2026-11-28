@@ -756,7 +756,7 @@ export async function llmSuggest(
   const selectedMood = knownMood
     ? {
         ...knownMood,
-        guidance: [knownMood.guidance, spriteDescription].filter(Boolean).join('\\n'),
+        guidance: [knownMood.guidance, spriteDescription].filter(Boolean).join('\n'),
       }
     : {
         label: requestedEmotion,
