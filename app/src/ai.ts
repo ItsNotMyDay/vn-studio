@@ -168,6 +168,18 @@ const EMOTION_PROMPT: Record<string, string> = {
   angry: 'angry expression, furrowed brows, narrowed eyes, tight frown',
   sad: 'sad expression, drooping brows, glossy teary eyes, slight frown',
   surprised: 'surprised expression, wide open eyes, raised brows, small open mouth',
+  // Common additional expressions can be entered in Russian in the character editor.
+  'смущение': 'shy bashful expression, blushing cheeks, slightly averted gaze',
+  'страх': 'fearful expression, tense brows, wide worried eyes, slightly open mouth',
+  'плач': 'crying expression, visible tears, trembling lower lip, sorrowful eyes',
+  'смех': 'joyful laughing expression, open-mouth laugh, cheerful squinting eyes',
+  'подмигивание': 'playful wink, one eye closed, subtle confident smile',
+  'сонливость': 'sleepy expression, half-closed eyes, relaxed brows, small yawn',
+  'отвращение': 'disgusted expression, wrinkled nose, raised upper lip, narrowed eyes',
+  'решимость': 'determined expression, focused eyes, firm brows, confident closed mouth',
+  'растерянность': 'confused expression, uneven raised brows, puzzled eyes, slightly tilted head',
+  'восторг': 'excited delighted expression, sparkling wide eyes, bright open smile',
+  'сарказм': 'sarcastic smirk, one raised eyebrow, half-lidded eyes',
 };
 
 function hexToHsl(hex: string): [number, number, number] {
@@ -215,16 +227,30 @@ export function skinTone(hex: string): string {
   return 'deep dark skin';
 }
 
-export function buildSpritePrompt(c: Character, expression: string, s: AiSettings): string {
+export type CharacterSpriteFraming = 'portrait' | 'full';
+
+export function buildSpritePrompt(
+  c: Character,
+  expression: string,
+  s: AiSettings,
+  framing: CharacterSpriteFraming = 'portrait',
+): string {
+  const composition = framing === 'full'
+    ? 'anime visual novel full-body character sprite, entire body visible from head to toe, standing pose, feet fully visible, centered, facing viewer, complete silhouette, no cropping, consistent character design'
+    : 'anime visual novel character sprite, single character, upper body portrait, centered, facing viewer, consistent character design';
+  const emotionKey = expression.trim().toLowerCase();
+  const emotionPrompt = EMOTION_PROMPT[expression]
+    ?? EMOTION_PROMPT[emotionKey]
+    ?? `${expression.trim()} facial expression`;
   const parts = [
-    'anime visual novel character sprite, single character, upper body portrait, centered, facing viewer, consistent character design',
+    composition,
     c.name ? `character name: ${c.name}` : '',
     c.appearance?.trim() ? `appearance: ${c.appearance.trim()}` : '',
     c.personality?.trim() ? `personality and mood: ${c.personality.trim()}` : '',
     `hair: ${colorName(c.hair, 'hair')} hair, exact hair color ${c.hair}`,
     `outfit: ${colorName(c.jacket, 'cloth')} clothing, exact clothing color ${c.jacket}`,
     `skin: ${skinTone(c.skin)}, exact skin tone ${c.skin}`,
-    `facial expression: ${EMOTION_PROMPT[expression] ?? EMOTION_PROMPT.neutral}`,
+    `facial expression: ${emotionPrompt}`,
     'clean lineart, soft cel shading, crisp eyes, high detail, studio quality',
     s.transparent ? 'isolated on transparent background, no scenery, no props' : '',
   ].filter(Boolean);
