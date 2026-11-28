@@ -3,6 +3,8 @@ import { FloatingWindow } from './FloatingWindow';
 import { Sparkles, X, RefreshCw, Check, Dice5, Server, Download, Wand2, AlertTriangle, Loader2 } from 'lucide-react';
 import { useStore } from './store';
 import { downloadBlob, useAssetURL } from './assets';
+import { CharacterPromptTextarea } from './CharacterPromptTextarea';
+import { expandCharacterReferences } from './textVariables';
 import {
   loadAiSettings, saveAiSettings, buildSpritePrompt, aiHealth, aiStartJob, aiPollJob, aiCancelJob,
   base64ToBlob, bakeProceduralSprite, EMOTION_RU, colorName, skinTone, type AiSettings, type JobState, type LocalQuantizationMode,
@@ -13,6 +15,7 @@ type Phase = 'idle' | 'checking' | 'loading' | 'generating' | 'done' | 'error';
 
 export function AiSpriteDialog({ target, onClose }: { target: { charId: string; expr: string } | null; onClose: () => void }) {
   const c = useStore(s => s.project.characters.find(x => x.id === target?.charId));
+  const characters = useStore(s => s.project.characters);
   const applySpriteBlob = useStore(s => s.applySpriteBlob);
   const currentUrl = useAssetURL(c?.sprites?.[target?.expr ?? '']);
   const [cfg, setCfg] = useState<AiSettings>(loadAiSettings());
@@ -48,15 +51,14 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
 
   useEffect(() => {
     if (!target || !c) return;
-    setPrompt(buildSpritePrompt(c, target.expr, cfg, framing));
     setPhase('idle'); setProgress(0); setStage(''); setMessage(''); setResult(null);
     aiHealth(cfg.endpoint).then(h => { if (aliveRef.current) setHealth(h); });
   }, [target?.charId, target?.expr]);
 
   useEffect(() => {
     if (!target || !c) return;
-    setPrompt(buildSpritePrompt(c, target.expr, cfg));
-  }, [framing, cfg.transparent, cfg.width, cfg.height, c?.name, c?.appearance, c?.personality, c?.hairStyle, c?.hair, c?.jacket, c?.skin]);
+    setPrompt(buildSpritePrompt(c, target.expr, cfg, framing));
+  }, [target?.charId, target?.expr, framing, cfg.transparent, cfg.width, cfg.height, c?.name, c?.appearance, c?.hairStyle, c?.hair, c?.jacket, c?.skin]);
 
   if (!target || !c) return null;
 
@@ -137,8 +139,10 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
       const final = await runJob('/generate', {
         model_id: cfg.modelId,
         model_path: cfg.modelPath,
-        prompt,
-        negative_prompt: cfg.negative,
+        prompt: expandCharacterReferences(prompt, characters),
+        negative_prompt: framing === 'full'
+          ? `${cfg.negative}, close-up, bust shot, waist-up portrait, cropped body, cropped legs, cropped feet, feet outside the frame, head outside the frame`
+          : cfg.negative,
         width: cfg.width,
         height: cfg.height,
         steps: cfg.steps,
@@ -282,7 +286,10 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
                   type="button"
                   className={`btn !py-1 ${framing === 'portrait' ? 'btn-primary' : ''}`}
                   aria-pressed={framing === 'portrait'}
-                  onClick={() => setFraming('portrait')}
+                  onClick={() => {
+                    setFraming('portrait');
+                    patch({ width: 768, height: 1024 });
+                  }}
                 >
                   Портрет
                 </button>
@@ -290,7 +297,10 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
                   type="button"
                   className={`btn !py-1 ${framing === 'full' ? 'btn-primary' : ''}`}
                   aria-pressed={framing === 'full'}
-                  onClick={() => setFraming('full')}
+                  onClick={() => {
+                    setFraming('full');
+                    patch({ width: 1024, height: 1536 });
+                  }}
                 >
                   Полный рост
                 </button>
@@ -298,7 +308,14 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
             </div>
             <label className="block">
               <span className="block text-[10.5px] uppercase tracking-wider text-mute mb-1">Промпт (внешность + характер + цвета + эмоция)</span>
-              <textarea className="textarea !min-h-[132px] font-mono !text-[11.5px]" value={prompt} onChange={e => setPrompt(e.target.value)} />
+              <CharacterPromptTextarea
+                className="textarea !min-h-[132px] font-mono !text-[11.5px]"
+                value={prompt}
+                onChange={setPrompt}
+                characters={characters}
+                placeholder="Описание внешности, детали одежды… Используй @ИМЯ_ПЕРСОНАЖА, чтобы добавить другого героя."
+              />
+              <div className="text-[10px] text-mute mt-1">Введи @, чтобы выбрать персонажа. Его внешность будет подставлена в запрос генерации.</div>
             </label>
             <label className="block">
               <span className="block text-[10.5px] uppercase tracking-wider text-mute mb-1">Негативный промпт</span>
