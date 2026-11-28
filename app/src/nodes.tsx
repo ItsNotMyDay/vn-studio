@@ -132,7 +132,7 @@ function DialogueNode({ id, data, selected }: any) {
                 <span className="truncate font-semibold" style={{ color }}>
                   {character?.isNarrator ? 'Рассказчик' : character?.name ?? '— не выбран —'}
                 </span>
-                <span className="shrink-0 text-[9px] text-mute">{EXPR_RU[reply.expression ?? 'neutral'] ?? 'спокойствие'}</span>
+                <span className="shrink-0 text-[9px] text-mute">{reply.expression ? (EXPR_RU[reply.expression] ?? reply.expression) : 'без спрайта'}</span>
               </div>
               <div className="text-paper/90 line-clamp-2">
                 {reply.text || <span className="text-mute italic">пустая реплика…</span>}
