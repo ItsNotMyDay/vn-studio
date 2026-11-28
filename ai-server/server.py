@@ -1198,9 +1198,12 @@ def load_llm(path: str, quantization_mode: str = "none"):
             model = model.to(device)
         model.eval()
         if cache_dir is not None and not cache_hit:
-            map_targets = {
-                str(value).lower() for value in (kwargs.get("device_map") or {}).values()
-            }
+            configured_device_map = kwargs.get("device_map")
+            map_targets = (
+                {str(value).lower() for value in configured_device_map.values()}
+                if isinstance(configured_device_map, dict)
+                else set()
+            )
             if map_targets.intersection({"cpu", "disk"}):
                 print(
                     "[quant-cache] Skipping serialization of an offloaded LLM; "
