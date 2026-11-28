@@ -66,6 +66,8 @@ export interface Character {
   spriteMeta?: Partial<Record<string, { source: string; prompt?: string; seed?: number; model?: string }>>;
   /** Additional emotion names created by the user for this character. */
   expressions?: string[];
+  /** Description of the emotion represented by each named character sprite. */
+  expressionDescriptions?: Record<string, string>;
   isNarrator?: boolean;
 }
 export interface Background { id: string; name: string; kind: 'park' | 'cafe' | 'city' | 'room'; assetId?: string; }
@@ -1308,9 +1310,11 @@ export const useStore = create<Store>((set, get) => {
             const expressions = (c.expressions ?? []).filter(item => item !== expression);
             const sprites = { ...(c.sprites ?? {}) };
             const spriteMeta = { ...(c.spriteMeta ?? {}) };
+            const expressionDescriptions = { ...(c.expressionDescriptions ?? {}) };
             delete sprites[expression];
             delete spriteMeta[expression];
-            return { ...c, expressions, sprites, spriteMeta };
+            delete expressionDescriptions[expression];
+            return { ...c, expressions, sprites, spriteMeta, expressionDescriptions };
           }),
         },
       }));
@@ -1498,6 +1502,18 @@ export const useStore = create<Store>((set, get) => {
       const currentCharacterId = currentReply?.characterId ?? d.characterId;
       const character = characters.find(c => c.id === currentCharacterId);
       const currentEmotion = currentReply?.expression ?? d.expression ?? 'neutral';
+      const currentEmotionDescription = character?.expressionDescriptions?.[currentEmotion]?.trim() ?? '';
+      const dialogueReplies = nodeReplies.map(reply => {
+        const speaker = characters.find(c => c.id === reply.characterId);
+        const spriteName = reply.expression ?? 'neutral';
+        return {
+          speaker: speaker?.name ?? '???',
+          text: reply.text ?? '',
+          sprite_name: spriteName,
+          emotion: spriteName,
+          emotion_description: speaker?.expressionDescriptions?.[spriteName]?.trim() ?? '',
+        };
+      });
       const visited = new Set<string>();
       const queue: string[] = [];
       const startNode = sc.nodes.find(n => n.type === 'start');
@@ -1524,6 +1540,7 @@ export const useStore = create<Store>((set, get) => {
               meta: {
                 speaker: ch?.name ?? '???',
                 emotion: reply.expression ?? 'neutral',
+                emotion_description: ch?.expressionDescriptions?.[reply.expression ?? 'neutral']?.trim() ?? '',
                 node_type: 'dialogue',
                 character_id: reply.characterId,
               },
@@ -1548,6 +1565,11 @@ export const useStore = create<Store>((set, get) => {
         }
         sc.edges.filter(e => e.source === curId && e.sourceHandle !== 'stop').forEach(e => queue.push(e.target));
       }
+      nodeReplies.forEach(reply => {
+        if (!reply.characterId) return;
+        seenChars.add(reply.characterId);
+        (charLines[reply.characterId] ??= []).push(reply.text ?? '');
+      });
       const otherChars = Array.from(seenChars).filter(id => id && id !== currentCharacterId).map(id => {
         const c = characters.find(x => x.id === id);
         if (!c) return null;
@@ -1560,6 +1582,7 @@ export const useStore = create<Store>((set, get) => {
         const res = await embeddingsSearch(ep, query, 5, sc.id);
         if (res.results.length) ragContext = res.results.map(r => `[из главы ${r.chapter_id}] ${r.text}`);
       }
+      const currentLocation = bgs[bgs.length - 1] ?? '';
       return {
         chapter_title: sc.name,
         current_node: {
@@ -1567,11 +1590,15 @@ export const useStore = create<Store>((set, get) => {
           character_personality: character?.personality ?? '',
           character_appearance: character?.appearance ?? '',
           emotion: currentEmotion,
+          sprite_name: currentEmotion,
+          emotion_description: currentEmotionDescription,
+          location: currentLocation,
           character_vars: character?.vars?.reduce((acc, v) => ({ ...acc, [v.key]: v.value }), {}) ?? {},
         },
+        dialogue_replies: dialogueReplies,
         event_history: eventHistory.slice(-15),
         other_characters_present: otherChars,
-        scene_atmosphere: { backgrounds: bgs, tracks: trs },
+        scene_atmosphere: { backgrounds: bgs, tracks: trs, location: currentLocation },
         rag_context: ragContext,
       };
     },
@@ -1590,6 +1617,7 @@ export const useStore = create<Store>((set, get) => {
               meta: {
                 speaker: ch?.name,
                 emotion: reply.expression ?? 'neutral',
+                emotion_description: get().project.characters.find(c => c.id === reply.characterId)?.expressionDescriptions?.[reply.expression ?? 'neutral']?.trim() ?? '',
                 node_type: 'dialogue',
                 character_id: reply.characterId,
               },
