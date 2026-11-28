@@ -102,7 +102,7 @@ export function expandCharacterReferences(prompt: string, characters: Character[
     byAlias.set(characterVariableAlias(character).toLocaleUpperCase(), character);
   });
   return String(prompt ?? '').replace(
-    /@([\p{L}\p{N}_-]+)(?![\p{L}\p{N}_-]|\.)/gu,
+    /@([\p{L}\p{N}_-]+)/gu,
     (token, alias: string) => {
       const character = byAlias.get(alias.toLocaleUpperCase());
       if (!character) return token;
