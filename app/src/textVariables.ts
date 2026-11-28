@@ -68,7 +68,7 @@ export function getCharacterReferenceAutocomplete(
   characters: Character[],
 ): CharacterReferenceAutocomplete | null {
   const prefix = value.slice(0, cursor);
-  const match = /@([^@\\s.]*)$/u.exec(prefix);
+  const match = /@([^@\s.]*)$/u.exec(prefix);
   if (!match) return null;
   const query = match[1].toLocaleUpperCase();
   const start = cursor - match[0].length;
@@ -102,7 +102,7 @@ export function expandCharacterReferences(prompt: string, characters: Character[
     byAlias.set(characterVariableAlias(character).toLocaleUpperCase(), character);
   });
   return String(prompt ?? '').replace(
-    /@([\\p{L}\\p{N}_-]+)(?![\\p{L}\\p{N}_-]|\\.)/gu,
+    /@([\p{L}\p{N}_-]+)(?![\p{L}\p{N}_-]|\.)/gu,
     (token, alias: string) => {
       const character = byAlias.get(alias.toLocaleUpperCase());
       if (!character) return token;
