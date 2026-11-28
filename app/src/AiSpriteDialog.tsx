@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { FloatingWindow } from './FloatingWindow';
 import { Sparkles, X, RefreshCw, Check, Dice5, Server, Download, Wand2, AlertTriangle, Loader2 } from 'lucide-react';
 import { useStore } from './store';
-import { useAssetURL } from './assets';
+import { downloadBlob, useAssetURL } from './assets';
 import {
   loadAiSettings, saveAiSettings, buildSpritePrompt, aiHealth, aiStartJob, aiPollJob, aiCancelJob,
   base64ToBlob, bakeProceduralSprite, EMOTION_RU, colorName, skinTone, type AiSettings, type JobState, type LocalQuantizationMode,
@@ -16,6 +16,7 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
   const applySpriteBlob = useStore(s => s.applySpriteBlob);
   const currentUrl = useAssetURL(c?.sprites?.[target?.expr ?? '']);
   const [cfg, setCfg] = useState<AiSettings>(loadAiSettings());
+  const [framing, setFraming] = useState<'portrait' | 'full'>('portrait');
   const [prompt, setPrompt] = useState('');
   const [phase, setPhase] = useState<Phase>('idle');
   const [progress, setProgress] = useState(0);
@@ -47,7 +48,7 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
 
   useEffect(() => {
     if (!target || !c) return;
-    setPrompt(buildSpritePrompt(c, target.expr, cfg));
+    setPrompt(buildSpritePrompt(c, target.expr, cfg, framing));
     setPhase('idle'); setProgress(0); setStage(''); setMessage(''); setResult(null);
     aiHealth(cfg.endpoint).then(h => { if (aliveRef.current) setHealth(h); });
   }, [target?.charId, target?.expr]);
@@ -55,7 +56,7 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
   useEffect(() => {
     if (!target || !c) return;
     setPrompt(buildSpritePrompt(c, target.expr, cfg));
-  }, [cfg.transparent, cfg.width, cfg.height, c?.appearance, c?.personality, c?.hair, c?.jacket, c?.skin]);
+  }, [framing, cfg.transparent, cfg.width, cfg.height, c?.name, c?.appearance, c?.personality, c?.hairStyle, c?.hair, c?.jacket, c?.skin]);
 
   if (!target || !c) return null;
 
@@ -230,9 +231,20 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
                 </div>
               )}
               {result && !busy && (
-                <span className="absolute top-2 left-2 chip" style={{ borderColor: result.source === 'ai' ? '#9dff5766' : '#ffb45466', color: result.source === 'ai' ? '#9dff57' : '#ffb454' }}>
-                  {result.source === 'ai' ? `AI · seed ${result.seed}` : `локальный рендер · seed ${result.seed}`}
-                </span>
+                <>
+                  <span className="absolute top-2 left-2 chip" style={{ borderColor: result.source === 'ai' ? '#9dff5766' : '#ffb45466', color: result.source === 'ai' ? '#9dff57' : '#ffb454' }}>
+                    {result.source === 'ai' ? `AI · seed ${result.seed}` : `локальный рендер · seed ${result.seed}`}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn !w-9 !h-9 !p-0 justify-center absolute bottom-2 right-2 z-20 bg-ink-950/90"
+                    title="Скачать изображение"
+                    aria-label="Скачать изображение"
+                    onClick={() => downloadBlob(result.blob, `${c.name || 'character'}-${target.expr}-sprite`)}
+                  >
+                    <Download size={16} />
+                  </button>
+                </>
               )}
             </div>
 
@@ -257,12 +269,33 @@ export function AiSpriteDialog({ target, onClose }: { target: { charId: string; 
                 <span className="chip"><i className="w-2.5 h-2.5 rounded-full" style={{ background: c.hair }} /> волосы: {colorName(c.hair, 'hair')}</span>
                 <span className="chip"><i className="w-2.5 h-2.5 rounded-full" style={{ background: c.jacket }} /> одежда: {colorName(c.jacket, 'cloth')}</span>
                 <span className="chip"><i className="w-2.5 h-2.5 rounded-full" style={{ background: c.skin }} /> кожа: {skinTone(c.skin)}</span>
-                <span className="chip border-magenta/50 text-magenta">{EMOTION_RU[target.expr]}</span>
+                <span className="chip border-magenta/50 text-magenta">{EMOTION_RU[target.expr] || target.expr}</span>
               </div>
             </div>
           </div>
 
           <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[10.5px] uppercase tracking-wider text-mute">Кадрирование</span>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  className={`btn !py-1 ${framing === 'portrait' ? 'btn-primary' : ''}`}
+                  aria-pressed={framing === 'portrait'}
+                  onClick={() => setFraming('portrait')}
+                >
+                  Портрет
+                </button>
+                <button
+                  type="button"
+                  className={`btn !py-1 ${framing === 'full' ? 'btn-primary' : ''}`}
+                  aria-pressed={framing === 'full'}
+                  onClick={() => setFraming('full')}
+                >
+                  Полный рост
+                </button>
+              </div>
+            </div>
             <label className="block">
               <span className="block text-[10.5px] uppercase tracking-wider text-mute mb-1">Промпт (внешность + характер + цвета + эмоция)</span>
               <textarea className="textarea !min-h-[132px] font-mono !text-[11.5px]" value={prompt} onChange={e => setPrompt(e.target.value)} />

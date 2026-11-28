@@ -760,7 +760,28 @@ function CharacterVariablesEditor({ c }: { c: Character }) {
 function CharacterEditor({ c }: { c: Character }) {
   const s = useStore();
   const [expr, setExpr] = useState('smile');
+  const [newEmotionName, setNewEmotionName] = useState('');
   const [aiTarget, setAiTarget] = useState<{ charId: string; expr: string } | null>(null);
+  const expressions = Array.from(new Set([...EXPR, ...(c.expressions ?? [])]));
+  const expressionSignature = expressions.join('|');
+
+  useEffect(() => {
+    if (!expressions.includes(expr)) setExpr(expressions[0] ?? 'neutral');
+  }, [c.id, expressionSignature, expr]);
+
+  const addEmotion = () => {
+    const name = newEmotionName.trim();
+    if (!name) return;
+    const existing = expressions.find(item => item.toLocaleLowerCase() === name.toLocaleLowerCase());
+    if (existing) {
+      setExpr(existing);
+      setNewEmotionName('');
+      return;
+    }
+    s.updateCharacter(c.id, { expressions: [...(c.expressions ?? []), name] });
+    setExpr(name);
+    setNewEmotionName('');
+  };
   if (c.isNarrator) return (
     <div className="p-3 space-y-3">
       <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full" style={{ background: '#f4ead8' }} /><span className="font-display font-bold text-[14px]">Рассказчик</span><span className="chip border-amber-glow/60 text-amber-glow">GLOBAL</span></div>
@@ -806,35 +827,50 @@ function CharacterEditor({ c }: { c: Character }) {
           <button
             className="btn !px-2 !py-0.5"
             style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}
-            title={`AI-спрайт для эмоции «${EXPR_RU[expr]}»`}
+            title={`AI-спрайт для эмоции «${EXPR_RU[expr] || expr}»`}
             onClick={() => setAiTarget({ charId: c.id, expr })}
           >
             <Sparkles size={11} /> AI
           </button>
         </div>
-        <div className="grid grid-cols-5 gap-1.5">
-          {EXPR.map(e => {
+        <div className="flex items-center gap-1.5 mb-2">
+          <input
+            className="input min-w-0 flex-1 !py-1"
+            value={newEmotionName}
+            placeholder="Новая эмоция, например: смущение"
+            onChange={e => setNewEmotionName(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addEmotion(); } }}
+          />
+          <button className="btn !px-2 !py-1 shrink-0" disabled={!newEmotionName.trim()}
+            style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}
+            title="Добавить эмоцию этому персонажу" onClick={addEmotion}>
+            <Plus size={12} /> Добавить
+          </button>
+        </div>
+        <div className="flex gap-1.5 overflow-x-auto overflow-y-hidden pb-2">
+          {expressions.map(e => {
             const aid = c.sprites?.[e];
             const meta = c.spriteMeta?.[e];
+            const label = EXPR_RU[e] || e;
             return (
-              <div key={e} className={`rounded-lg border p-1 space-y-1 ${expr === e ? 'border-ink-500 bg-ink-700' : 'border-ink-700 bg-ink-850'}`}>
+              <div key={e} className={`w-[88px] shrink-0 rounded-lg border p-1 space-y-1 ${expr === e ? 'border-ink-500 bg-ink-700' : 'border-ink-700 bg-ink-850'}`}>
                 <div className="relative">
-                  <button className="w-full h-14 rounded overflow-hidden flex items-end justify-center bg-ink-900" onClick={() => setExpr(e)} title={EXPR_RU[e]}>
+                  <button className="w-full h-14 rounded overflow-hidden flex items-end justify-center bg-ink-900" onClick={() => setExpr(e)} title={label}>
                     <SpriteThumb c={c} expr={e} />
                   </button>
                   <button
                     className="absolute -top-1.5 -right-1.5 z-10 w-5 h-5 rounded-full flex items-center justify-center border border-ink-950 shadow-lg hover:scale-110 transition-transform"
                     style={{ background: 'linear-gradient(135deg, var(--accent), #ff4d8d)', color: '#16090a' }}
-                    title={`AI-спрайт: ${EXPR_RU[e]}`}
+                    title={`AI-спрайт: ${label}`}
                     onClick={() => setAiTarget({ charId: c.id, expr: e })}
                   >
                     <Sparkles size={10} />
                   </button>
                   {meta?.source === 'ai' && <span className="absolute bottom-0 left-0 text-[8px] px-1 rounded-tr bg-lime/20 text-lime">AI</span>}
                 </div>
-                <div className="text-[9px] text-center text-mute truncate">{EXPR_RU[e]}</div>
+                <div className="text-[9px] text-center text-mute truncate" title={label}>{label}</div>
                 <div className="flex justify-center gap-1">
-                  <UploadButton accept="image/*" className="btn !px-1.5 !py-0.5" title={`Загрузить спрайт: ${EXPR_RU[e]}`} onFile={(f: File) => s.uploadSprite(c.id, e, f)}>
+                  <UploadButton accept="image/*" className="btn !px-1.5 !py-0.5" title={`Загрузить спрайт: ${label}`} onFile={(f: File) => s.uploadSprite(c.id, e, f)}>
                     <Upload size={10} />
                   </UploadButton>
                   {aid && (
