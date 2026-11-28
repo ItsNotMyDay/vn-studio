@@ -1189,12 +1189,8 @@ def load_llm(path: str, quantization_mode: str = "none"):
             shutil.rmtree(cache_dir, ignore_errors=True)
             cache_hit = False
             if quantization_mode == "int4" and not use_prequantized:
-                from transformers import BitsAndBytesConfig
-                kwargs["quantization_config"] = BitsAndBytesConfig(
-                    load_in_4bit=True,
-                    bnb_4bit_quant_type="nf4",
-                    bnb_4bit_compute_dtype=compute_dtype,
-                    bnb_4bit_use_double_quant=True,
+                kwargs["quantization_config"] = _llm_bnb_offload_config(
+                    model_info, compute_dtype, torch
                 )
             model = _load_model_from(path, kwargs)
 
