@@ -1,3 +1,23 @@
+/** Built-in sprite slots shown for every regular character. */
+export const DEFAULT_CHARACTER_SPRITES = ["neutral", "smile", "angry", "sad", "surprised"] as const;
+
+/**
+ * Names declared by a character. The union with sprite-map keys keeps custom
+ * sprites from older project files available even if expressions was not saved.
+ */
+export function getCharacterSpriteNames(character?: {
+  expressions?: string[];
+  sprites?: Record<string, unknown>;
+  isNarrator?: boolean;
+} | null): string[] {
+  if (!character || character.isNarrator) return [];
+  return Array.from(new Set([
+    ...DEFAULT_CHARACTER_SPRITES,
+    ...(character.expressions ?? []),
+    ...Object.keys(character.sprites ?? {}),
+  ].map(name => String(name).trim()).filter(Boolean)));
+}
+
 export interface DialogueReply {
   id: string;
   characterId?: string;

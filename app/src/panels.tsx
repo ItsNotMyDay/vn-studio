@@ -25,7 +25,7 @@ import { AudioEditor } from './AudioEditor';
 import { SoundEffectBuilder } from './SoundEffectBuilder';
 import { FloatingWindow } from './FloatingWindow';
 import { readProject } from './projects';
-import { createDialogueReplyId, getDialogueReplies } from './dialogue';
+import { createDialogueReplyId, getDialogueReplies, getCharacterSpriteNames } from './dialogue';
 import {
   loadAiSettings, saveAiSettings, aiHealth, llmHealth, embeddingsHealth, embeddingsClear, aiListModels,
   aiLoadJob, llmLoadJob, aiUnloadModel, llmUnload, aiCancelJob,
@@ -762,7 +762,7 @@ function CharacterEditor({ c }: { c: Character }) {
   const [expr, setExpr] = useState('smile');
   const [newEmotionName, setNewEmotionName] = useState('');
   const [aiTarget, setAiTarget] = useState<{ charId: string; expr: string } | null>(null);
-  const expressions = Array.from(new Set([...EXPR, ...(c.expressions ?? [])]));
+  const expressions = Array.from(new Set([...EXPR, ...(c.expressions ?? []), ...Object.keys(c.sprites ?? {})]));
   const expressionSignature = expressions.join('|');
 
   useEffect(() => {
@@ -827,7 +827,7 @@ function CharacterEditor({ c }: { c: Character }) {
           <button
             className="btn !px-2 !py-0.5"
             style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}
-            title={`AI-спрайт для эмоции «${EXPR_RU[expr] || expr}»`}
+            title={`AI-спрайт «${EXPR_RU[expr] || expr}»`}
             onClick={() => setAiTarget({ charId: c.id, expr })}
           >
             <Sparkles size={11} /> AI
@@ -837,13 +837,13 @@ function CharacterEditor({ c }: { c: Character }) {
           <input
             className="input min-w-0 flex-1 !py-1"
             value={newEmotionName}
-            placeholder="Новая эмоция, например: смущение"
+            placeholder="Новый спрайт, например: смущение"
             onChange={e => setNewEmotionName(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addEmotion(); } }}
           />
           <button className="btn !px-2 !py-1 shrink-0" disabled={!newEmotionName.trim()}
             style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}
-            title="Добавить эмоцию этому персонажу" onClick={addEmotion}>
+            title="Добавить спрайт этому персонажу" onClick={addEmotion}>
             <Plus size={12} /> Добавить
           </button>
         </div>
@@ -905,6 +905,20 @@ function CharacterEditor({ c }: { c: Character }) {
         >
           <SpriteThumb c={c} expr={expr} big />
         </div>
+        <Field label={`Описание эмоции · ${EXPR_RU[expr] || expr}`}>
+          <textarea
+            className="textarea !min-h-[64px]"
+            value={c.expressionDescriptions?.[expr] ?? ''}
+            placeholder="Опиши настроение и выражение этого спрайта. Описание попадёт в промпт генерации."
+            onChange={event => {
+              const description = event.target.value;
+              const expressionDescriptions = { ...(c.expressionDescriptions ?? {}) };
+              if (description.trim()) expressionDescriptions[expr] = description;
+              else delete expressionDescriptions[expr];
+              s.updateCharacter(c.id, { expressionDescriptions });
+            }}
+          />
+        </Field>
       </div>
 
       <AiSpriteDialog target={aiTarget} onClose={() => setAiTarget(null)} />
@@ -912,7 +926,7 @@ function CharacterEditor({ c }: { c: Character }) {
   );
 }
 
-export function Inspector() {
+export function Inspector({ hidden = false }: { hidden?: boolean }) {
   const s = useStore();
   const sc = s.scene();
   const node = sc?.nodes.find(n => n.selected);
@@ -929,6 +943,8 @@ export function Inspector() {
   const suggestAbort = useRef<AbortController | null>(null);
   const suggestJob = useRef<string | null>(null);
   const dialogueReplies = node?.type === 'dialogue' ? getDialogueReplies(d, node.id) : [];
+  const selectedDialogueReply = dialogueReplies[dialogueReplies.length - 1];
+  const selectedDialogueCharacter = s.project.characters.find(character => character.id === selectedDialogueReply?.characterId);
 
   useEffect(() => {
     setEditingReplyId(null);
@@ -945,10 +961,16 @@ export function Inspector() {
   const addDialogueReply = () => {
     if (!node || node.type !== 'dialogue') return;
     const previous = dialogueReplies[dialogueReplies.length - 1];
+    const characterId = previous?.characterId ?? s.project.characters.find(c => !c.isNarrator)?.id ?? '';
+    const selectedCharacter = s.project.characters.find(character => character.id === characterId);
+    const spriteNames = getCharacterSpriteNames(selectedCharacter);
+    const expression = spriteNames.includes(previous?.expression ?? '')
+      ? previous?.expression ?? ''
+      : spriteNames[0] ?? '';
     const reply = {
       id: createDialogueReplyId(),
-      characterId: previous?.characterId ?? s.project.characters.find(c => !c.isNarrator)?.id ?? '',
-      expression: previous?.expression ?? 'neutral',
+      characterId,
+      expression,
       text: '',
     };
     s.updateNodeData(node.id, { replies: [...dialogueReplies, reply] });
@@ -999,7 +1021,7 @@ export function Inspector() {
   };
 
   return (
-    <div className={`${s.rightOpen ? 'flex' : 'hidden'} w-[320px] shrink-0 flex-col border-l border-ink-700 panel relative z-10`}>
+    <div className={`${s.rightOpen && !hidden ? 'flex' : 'hidden'} w-[320px] shrink-0 flex-col border-l border-ink-700 panel relative z-10`}>
       <div className="h-9 shrink-0 flex items-center gap-2 px-3 border-b border-ink-700 text-[10.5px] uppercase tracking-wider font-bold text-mute">
         <span className="truncate">{ch ? 'Карточка героя' : node ? `Нода · ${KIND_META[node.type as NodeKind]?.label ?? node.type}` : 'Сцена'}</span>
         <div className="flex-1" />
@@ -1031,7 +1053,11 @@ export function Inspector() {
                         <select
                           className="select min-w-0 flex-1"
                           value={reply.characterId ?? ''}
-                          onChange={event => updateDialogueReply(reply.id, { characterId: event.target.value })}
+                          onChange={event => {
+                            const characterId = event.target.value;
+                            const character = s.project.characters.find(item => item.id === characterId);
+                            updateDialogueReply(reply.id, { characterId, expression: getCharacterSpriteNames(character)[0] ?? '' });
+                          }}
                           aria-label={`Персонаж реплики ${index + 1}`}
                         >
                           <option value="">— персонаж —</option>
@@ -1040,12 +1066,20 @@ export function Inspector() {
                           ))}
                         </select>
                         <select
-                          className="select !w-[112px] shrink-0"
-                          value={reply.expression ?? 'neutral'}
+                          className="select !w-[132px] shrink-0"
+                          value={(() => {
+                            const sprites = getCharacterSpriteNames(s.project.characters.find(item => item.id === reply.characterId));
+                            return sprites.includes(reply.expression ?? '') ? reply.expression ?? '' : sprites[0] ?? '';
+                          })()}
                           onChange={event => updateDialogueReply(reply.id, { expression: event.target.value })}
-                          aria-label={`Эмоция реплики ${index + 1}`}
+                          aria-label={`Спрайт реплики ${index + 1}`}
+                          disabled={!getCharacterSpriteNames(s.project.characters.find(item => item.id === reply.characterId)).length}
                         >
-                          {EXPR.map(expression => <option key={expression} value={expression}>{EXPR_RU[expression]}</option>)}
+                          {getCharacterSpriteNames(s.project.characters.find(item => item.id === reply.characterId)).length
+                            ? getCharacterSpriteNames(s.project.characters.find(item => item.id === reply.characterId)).map(sprite => (
+                                <option key={sprite} value={sprite}>{EXPR_RU[sprite] ?? sprite}</option>
+                              ))
+                            : <option value="">— нет спрайтов —</option>}
                         </select>
                         {dialogueReplies.length > 1 && (
                           <button
@@ -1387,9 +1421,20 @@ export function Inspector() {
                         {s.project.characters.filter(c => !c.isNarrator).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                       </select>
                     </Field>
-                    <Field label="Настроение">
-                      <select className="select" value={d.expression ?? 'neutral'} onChange={e => s.updateNodeData(node.id, { expression: e.target.value })}>
-                        {EXPR.map(e => <option key={e} value={e}>{EXPR_RU[e]}</option>)}
+                    <Field label="Спрайт">
+                      <select
+                        className="select"
+                        value={(() => {
+                          const names = getCharacterSpriteNames(s.project.characters.find(character => character.id === d.characterId));
+                          return names.includes(d.expression ?? '') ? d.expression ?? '' : names[0] ?? '';
+                        })()}
+                        disabled={!getCharacterSpriteNames(s.project.characters.find(character => character.id === d.characterId)).length}
+                        onChange={e => s.updateNodeData(node.id, { expression: e.target.value })}
+                      >
+                        {getCharacterSpriteNames(s.project.characters.find(character => character.id === d.characterId)).map(name => (
+                          <option key={name} value={name}>{EXPR_RU[name] ?? name}</option>
+                        ))}
+                        {!getCharacterSpriteNames(s.project.characters.find(character => character.id === d.characterId)).length && <option value="">— нет спрайтов —</option>}
                       </select>
                     </Field>
                   </>
@@ -1484,7 +1529,7 @@ export function Inspector() {
               </span>
               <div className="flex-1" />
               <span className="chip border-ink-600 text-mute">
-                {s.project.characters.find(c => c.id === d.characterId)?.name ?? '???'} · {EXPR_RU[d.expression ?? 'neutral'] ?? 'спокойствие'}
+                {selectedDialogueCharacter?.name ?? '???'} · {selectedDialogueReply?.expression ? (EXPR_RU[selectedDialogueReply.expression] ?? selectedDialogueReply.expression) : 'без спрайта'}
               </span>
               <button className="btn !px-2" disabled={suggesting} onClick={() => setSugPhase(null)} title="Закрыть"><X size={14} /></button>
             </div>
